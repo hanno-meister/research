@@ -43,7 +43,11 @@ class AgentInputState(TypedDict):
 class AgentState(TypedDict):
     research_intent: str
     research_brief: NotRequired[str]
-    research_findings: Annotated[list[str], operator.add]
+    research_findings: NotRequired[Annotated[list[str], operator.add]]
+    research_sources: NotRequired[Annotated[list[dict[str, str | None]], operator.add]]
+    source_diversity_notes: NotRequired[Annotated[list[str], operator.add]]
+    search_provider_counts: NotRequired[dict[str, int]]
+    search_domain_counts: NotRequired[dict[str, int]]
     final_report: NotRequired[str]
 
 class SupervisorState(TypedDict):

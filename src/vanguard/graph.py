@@ -13,6 +13,7 @@ from .state import (
         AgentState,
         ResearchQuestion
 )
+from .research import conduct_research
 
 async def write_research_brief(state: AgentState, runtime: Runtime[LangGraphConfig]):
     model = ChatOpenAI(
@@ -37,17 +38,11 @@ async def write_research_brief(state: AgentState, runtime: Runtime[LangGraphConf
     return {
         "research_brief": response.research_brief
     }
-def conduct_research(state: AgentState):
-    research_brief = state.get("research_brief")
-    if not research_brief:
-        raise ValueError("Missing research_brief. Did write_research_brief run?")
-    return {
-        "research_findings": [
-            f"Fake finding based on: {research_brief}"
-        ]
-    }
 def final_report_generation(state: AgentState):
     findings = "\n".join(state.get("research_findings", []))
+    diversity_notes = "\n".join(state.get("source_diversity_notes", []))
+    if diversity_notes:
+        findings = f"{findings}\n\n{diversity_notes}"
     return {
         "final_report": f"Final report:\n\n{findings}"
     }
