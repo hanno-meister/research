@@ -18,7 +18,41 @@ class ResearchRunRecorder:
     sources_by_url: dict[str, SourceRecord] = field(default_factory=dict)
     source_ids_by_url: dict[str, str] = field(default_factory=dict)
     evidence_artifacts_by_url: dict[str, EvidenceArtifactRecord] = field(default_factory=dict)
+    initial_urls: set[str] = field(default_factory=set)
+    initial_evidence_paths: set[str] = field(default_factory=set)
     search_attempts: int = 0
+
+    @classmethod
+    def from_existing_records(
+        cls,
+        sources: list[SourceRecord],
+        evidence_artifacts: list[EvidenceArtifactRecord],
+    ) -> "ResearchRunRecorder":
+        recorder = cls()
+        artifacts_by_path = {
+            artifact["path"]: artifact
+            for artifact in evidence_artifacts
+            if isinstance(artifact.get("path"), str)
+        }
+        for source in sources:
+            normalized_url = source.get("normalized_url")
+            if not isinstance(normalized_url, str) or not normalized_url:
+                continue
+
+            source_id = source.get("source_id")
+            if isinstance(source_id, str) and source_id:
+                recorder.source_ids_by_url[normalized_url] = source_id
+            recorder.sources_by_url[normalized_url] = dict(source)
+            recorder.initial_urls.add(normalized_url)
+
+            raw_content_path = source.get("raw_content_path")
+            artifact = artifacts_by_path.get(raw_content_path)
+            if artifact:
+                recorder.evidence_artifacts_by_url[normalized_url] = dict(artifact)
+                artifact_path = artifact.get("path")
+                if isinstance(artifact_path, str):
+                    recorder.initial_evidence_paths.add(artifact_path)
+        return recorder
 
     def record_search_results(
         self,
@@ -61,11 +95,26 @@ class ResearchRunRecorder:
     def sources(self) -> list[SourceRecord]:
         return list(self.sources_by_url.values())
 
+    def new_sources(self) -> list[SourceRecord]:
+        return [
+            source
+            for normalized_url, source in self.sources_by_url.items()
+            if normalized_url not in self.initial_urls
+        ]
+
     def evidence_artifacts(self) -> list[EvidenceArtifactRecord]:
         return [
             artifact
             for normalized_url in self.sources_by_url
             if (artifact := self.evidence_artifacts_by_url.get(normalized_url)) is not None
+        ]
+
+    def new_evidence_artifacts(self) -> list[EvidenceArtifactRecord]:
+        return [
+            artifact
+            for normalized_url in self.sources_by_url
+            if (artifact := self.evidence_artifacts_by_url.get(normalized_url)) is not None
+            if artifact.get("path") not in self.initial_evidence_paths
         ]
 
     def provider_counts(self) -> dict[str, int]:

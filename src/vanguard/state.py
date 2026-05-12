@@ -55,6 +55,8 @@ class AgentState(TypedDict):
     research_sources: NotRequired[Annotated[list[dict[str, str | None]], operator.add]]
     evidence_artifacts: NotRequired[Annotated[list[dict[str, str | int | None]], operator.add]]
     source_diversity_notes: NotRequired[Annotated[list[str], operator.add]]
+    research_reviews: NotRequired[Annotated[list[dict[str, object]], operator.add]]
+    evidence_read_records: NotRequired[Annotated[list[dict[str, str | int]], operator.add]]
     search_provider_counts: NotRequired[dict[str, int]]
     search_domain_counts: NotRequired[dict[str, int]]
     final_report: NotRequired[str]

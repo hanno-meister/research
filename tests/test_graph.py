@@ -8,6 +8,11 @@ from typing import cast
 
 from vanguard import research
 from vanguard import planning
+from vanguard import review
+from vanguard.report import final_report_generation
+from vanguard.review import evidence as review_evidence
+from vanguard.review import followup as review_followup
+from vanguard.review import node as review_node
 from vanguard.research import policy
 from vanguard.research import node, tools
 from vanguard.research.agent import filesystem_backend
@@ -128,6 +133,20 @@ class FakePlanningModel:
     async def ainvoke(self, payload):
         self.calls.append(payload)
         return self.response
+
+
+class FakeReviewModel:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def with_structured_output(self, schema):
+        self.schema = schema
+        return self
+
+    async def ainvoke(self, payload):
+        self.calls.append(payload)
+        return self.responses.pop(0)
 
 
 @pytest.mark.asyncio
@@ -560,3 +579,362 @@ async def test_conduct_research_runs_workers_concurrently(monkeypatch):
         node.MAX_SEARCH_CALLS_PER_WORKER,
         node.MAX_SEARCH_CALLS_PER_WORKER,
     ]
+
+
+@pytest.mark.asyncio
+async def test_review_research_reads_only_known_evidence_without_persisting_content(monkeypatch, tmp_path):
+    backend = filesystem_backend(tmp_path)
+    backend.write("/evidence/real-research.md", "important raw evidence content")
+    monkeypatch.setattr(review_evidence, "filesystem_backend", lambda: backend)
+    fake_model = FakeReviewModel(
+        [
+            review.ResearchEvaluation(
+                sufficient=False,
+                coverage_assessment="Need to inspect evidence.",
+                evidence_to_read=[
+                    review.EvidenceReadRequest(
+                        source_id="S1",
+                        reason="Verify key claim.",
+                    ),
+                    review.EvidenceReadRequest(
+                        source_id="S999",
+                        reason="Unknown source should be ignored.",
+                    ),
+                ],
+            ),
+            review.ResearchEvaluation(
+                sufficient=True,
+                coverage_assessment="Evidence supports the finding.",
+            ),
+        ]
+    )
+    monkeypatch.setattr(review_node, "ChatOpenAI", lambda **kwargs: fake_model)
+
+    update = await review.review_research(
+        {
+            "research_intent": "intent",
+            "research_brief": "brief",
+            "research_findings": [
+                {
+                    "task_id": "task-1",
+                    "summary": "Finding",
+                    "source_ids": ["S1"],
+                    "evidence_paths": ["/evidence/real-research.md"],
+                }
+            ],
+            "research_sources": [
+                {
+                    "provider": "exa",
+                    "query": "intent",
+                    "url": "https://example.com/research",
+                    "title": "Research source",
+                    "summary": "Summary",
+                    "raw_content_path": "/evidence/real-research.md",
+                    "published_date": "2026-05-01",
+                    "normalized_url": "https://example.com/research",
+                    "canonical_domain": "example.com",
+                    "source_id": "S1",
+                }
+            ],
+            "evidence_artifacts": [
+                {
+                    "provider": "exa",
+                    "url": "https://example.com/research",
+                    "title": "Research source",
+                    "path": "/evidence/real-research.md",
+                    "content_sha256": "abc123",
+                    "content_characters": 30,
+                }
+            ],
+        },
+        SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key")),
+    )
+
+    assert len(fake_model.calls) == 2
+    assert update["evidence_read_records"] == [
+        {
+            "source_id": "S1",
+            "path": "/evidence/real-research.md",
+            "reason": "Verify key claim.",
+            "content_characters": len("important raw evidence content"),
+        }
+    ]
+    assert "content" not in update["evidence_read_records"][0]
+    assert update["research_reviews"][0]["evidence_read"] == update["evidence_read_records"]
+
+
+@pytest.mark.asyncio
+async def test_review_research_runs_bounded_follow_up_workers(monkeypatch, tmp_path):
+    agent = FakeResearchAgent()
+    fake_model = FakeReviewModel(
+        [
+            review.ResearchEvaluation(
+                sufficient=False,
+                coverage_assessment="Missing persistence coverage.",
+                follow_up_tasks=[
+                    planning.ResearchTask(
+                        id="follow-1",
+                        objective="Find persistence docs",
+                        rationale="Close coverage gap.",
+                        expected_output="Persistence finding.",
+                        effort="low",
+                    ),
+                    planning.ResearchTask(
+                        id="follow-2",
+                        objective="Find deployment docs",
+                        rationale="Extra task should be capped.",
+                        expected_output="Deployment finding.",
+                        effort="low",
+                    ),
+                ],
+            ),
+            review.ResearchEvaluation(
+                sufficient=True,
+                coverage_assessment="Follow-up closed the gap.",
+            ),
+        ]
+    )
+    monkeypatch.setattr(review_node, "ChatOpenAI", lambda **kwargs: fake_model)
+    monkeypatch.setattr(review_followup, "create_research_agent", lambda config, backend=None: agent)
+    monkeypatch.setattr(review_followup, "filesystem_backend", lambda: filesystem_backend(tmp_path))
+    monkeypatch.setattr(review_node, "MAX_FOLLOW_UP_WORKERS", 1)
+    monkeypatch.setattr(review_node, "MAX_FOLLOW_UP_SEARCHES", 1)
+
+    update = await review.review_research(
+        {
+            "research_intent": "intent",
+            "research_brief": "brief",
+            "research_findings": [],
+            "research_sources": [],
+            "evidence_artifacts": [],
+        },
+        SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key")),
+    )
+
+    assert len(agent.calls) == 1
+    payload, kwargs = agent.calls[0]
+    assert "Find persistence docs" in payload["messages"][0].content
+    assert kwargs["context"].search_budget.max_search_calls == 1
+    assert update["research_findings"] == [
+        {
+            "task_id": "follow-1",
+            "summary": "Compact source summary.",
+            "source_ids": ["S1"],
+            "evidence_paths": ["/evidence/real-research.md"],
+        }
+    ]
+    assert len(update["research_reviews"]) == 2
+
+
+def test_final_report_uses_review_caveats_and_promotes_follow_up_findings():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_tasks": [
+                {"id": "task-1", "objective": "Initial pattern evidence"},
+            ],
+            "research_findings": [
+                {
+                    "task_id": "task-1",
+                    "summary": "Plan-and-execute is an official current LangGraph pattern.",
+                    "source_ids": ["S24"],
+                    "evidence_paths": ["/evidence/mismatched.md"],
+                },
+                {
+                    "task_id": "task-5",
+                    "summary": "Plan-and-execute should be framed as archival or Deep Agents-maintained.",
+                    "source_ids": ["S90"],
+                    "evidence_paths": ["/evidence/deep-agents.md"],
+                },
+                {
+                    "task_id": "task-1",
+                    "summary": "Reducers support parallel state merging.",
+                    "source_ids": ["S1"],
+                    "evidence_paths": ["/evidence/graph-api.md"],
+                },
+            ],
+            "research_reviews": [
+                {
+                    "sufficient": True,
+                    "coverage_assessment": "Follow-up repaired weak pattern evidence.",
+                    "source_quality_assessment": "Official docs are strong; pattern examples need caveats.",
+                    "contradiction_notes": [
+                        "S24 is mismatched and should not support current plan-and-execute claims."
+                    ],
+                    "weak_or_unsupported_findings": [
+                        "Planner-executor as current official guidance is weak when citing S24."
+                    ],
+                }
+            ],
+            "evidence_read_records": [
+                {
+                    "source_id": "S24",
+                    "path": "/evidence/mismatched.md",
+                    "reason": "Verify mismatch.",
+                    "content_characters": 4000,
+                }
+            ],
+            "source_diversity_notes": ["task-1: mostly official docs"],
+        }
+    )
+
+    report = update["final_report"]
+    assert "## Executive Summary" in report
+    assert "## Key Findings" in report
+    assert "Reducers support parallel state merging." in report
+    assert "## Corrected / Follow-up Findings" in report
+    assert "Plan-and-execute should be framed as archival" in report
+    assert "## Caveated Findings" in report
+    assert "Plan-and-execute is an official current LangGraph pattern." in report
+    assert "## Limitations / Evidence Quality" in report
+    assert "S24 is mismatched" in report
+    assert "Raw evidence inspected for S24" in report
+
+
+def test_final_report_gracefully_handles_missing_review():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_findings": [
+                {
+                    "task_id": "task-1",
+                    "summary": "Compact finding.",
+                    "source_ids": ["S1"],
+                    "evidence_paths": ["/evidence/source.md"],
+                }
+            ],
+        }
+    )
+
+    report = update["final_report"]
+    assert "No evaluator review was available" in report
+    assert "Compact finding." in report
+    assert "sources: S1" in report
+
+
+def test_final_report_aggregates_review_caveats_without_source_id_substring_matches():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_tasks": [{"id": "task-1", "objective": "Initial"}],
+            "research_findings": [
+                {
+                    "task_id": "task-1",
+                    "summary": "Stable S1-backed finding.",
+                    "source_ids": ["S1"],
+                },
+                {
+                    "task_id": "task-1",
+                    "summary": "Weak S10-backed finding.",
+                    "source_ids": ["S10"],
+                },
+                {
+                    "task_id": "task-7",
+                    "summary": "Follow-up finding from review-requested task.",
+                    "source_ids": ["S20"],
+                },
+            ],
+            "research_reviews": [
+                {
+                    "sufficient": False,
+                    "source_quality_assessment": "Earlier evidence-quality concern.",
+                    "contradiction_notes": ["S10 is weak and should be caveated."],
+                    "weak_or_unsupported_findings": [],
+                    "follow_up_tasks": [
+                        {
+                            "id": "task-7",
+                            "objective": "Repair evidence",
+                        }
+                    ],
+                },
+                {
+                    "sufficient": True,
+                    "coverage_assessment": "Follow-up completed.",
+                    "contradiction_notes": [],
+                    "weak_or_unsupported_findings": [],
+                    "follow_up_tasks": [],
+                },
+            ],
+            "source_diversity_notes": ["follow-up task-7: targeted repair"],
+        }
+    )
+
+    report = update["final_report"]
+    key_findings = report.split("## Corrected / Follow-up Findings")[0]
+    corrected_findings = report.split("## Corrected / Follow-up Findings")[1].split("## Caveated Findings")[0]
+    assert "Stable S1-backed finding." in key_findings
+    assert "Weak S10-backed finding." not in key_findings
+    assert "## Caveated Findings" in report
+    assert "Weak S10-backed finding." in report
+    assert "S10 is weak and should be caveated." in report
+    assert "Follow-up finding from review-requested task." in corrected_findings
+    assert "Earlier evidence-quality concern." in report
+
+
+def test_final_report_caveat_takes_precedence_over_follow_up_section():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_tasks": [{"id": "task-1", "objective": "Initial"}],
+            "research_findings": [
+                {
+                    "task_id": "task-7",
+                    "summary": "Follow-up finding that still needs caveat.",
+                    "source_ids": ["S20"],
+                }
+            ],
+            "research_reviews": [
+                {
+                    "sufficient": True,
+                    "contradiction_notes": ["S20 remains uncertain."],
+                    "weak_or_unsupported_findings": [],
+                    "follow_up_tasks": [{"id": "task-7", "objective": "Repair"}],
+                }
+            ],
+            "source_diversity_notes": ["follow-up task-7: targeted repair"],
+        }
+    )
+
+    report = update["final_report"]
+    assert "## Caveated Findings" in report
+    assert "Follow-up finding that still needs caveat." in report.split("## Caveated Findings")[1]
+    assert "## Corrected / Follow-up Findings" not in report
+
+
+def test_final_report_ignores_colliding_follow_up_diversity_note_task_ids():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_tasks": [{"id": "task-1", "objective": "Initial"}],
+            "research_findings": [
+                {
+                    "task_id": "task-1",
+                    "summary": "Original task finding should stay key finding.",
+                    "source_ids": ["S1"],
+                },
+                {
+                    "task_id": "task-8",
+                    "summary": "Review-record follow-up should still be promoted.",
+                    "source_ids": ["S8"],
+                },
+            ],
+            "research_reviews": [
+                {
+                    "sufficient": True,
+                    "follow_up_tasks": [{"id": "task-8", "objective": "Repair"}],
+                }
+            ],
+            "source_diversity_notes": [
+                "follow-up task-1: colliding note should not promote originals"
+            ],
+        }
+    )
+
+    report = update["final_report"]
+    key_findings = report.split("## Corrected / Follow-up Findings")[0]
+    corrected_findings = report.split("## Corrected / Follow-up Findings")[1].split(
+        "## Limitations / Evidence Quality"
+    )[0]
+    assert "Original task finding should stay key finding." in key_findings
+    assert "Original task finding should stay key finding." not in corrected_findings
+    assert "Review-record follow-up should still be promoted." in corrected_findings

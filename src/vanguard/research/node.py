@@ -147,7 +147,10 @@ async def _run_research_worker(
 
 
 def _agent_input(
-    research_brief: str, task: ResearchWorkerTask
+    research_brief: str,
+    task: ResearchWorkerTask,
+    *,
+    search_call_budget: int = MAX_SEARCH_CALLS_PER_WORKER,
 ) -> dict[str, list[HumanMessage]]:
     return {
         "messages": [
@@ -160,7 +163,7 @@ def _agent_input(
                     "boundaries; do not research unrelated plan tasks. Do not return "
                     "source lists, evidence artifacts, provider counts, or domain counts; "
                     "those are tracked automatically. You have a hard budget of "
-                    f"{MAX_SEARCH_CALLS_PER_WORKER} search_gateway calls for this task.\n\n"
+                    f"{search_call_budget} search_gateway calls for this task.\n\n"
                     f"Research brief:\n{research_brief}"
                     f"{_worker_task_text(task)}"
                 )
@@ -262,11 +265,17 @@ def _state_update_from_parts(
     findings: list[dict[str, object]],
     diversity_notes: list[str],
     recorder: ResearchRunRecorder,
+    *,
+    new_only: bool = False,
 ):
+    sources = recorder.new_sources() if new_only else recorder.sources()
+    evidence_artifacts = (
+        recorder.new_evidence_artifacts() if new_only else recorder.evidence_artifacts()
+    )
     return {
         "research_findings": findings,
-        "research_sources": recorder.sources(),
-        "evidence_artifacts": recorder.evidence_artifacts(),
+        "research_sources": sources,
+        "evidence_artifacts": evidence_artifacts,
         "source_diversity_notes": diversity_notes,
         "search_provider_counts": recorder.provider_counts(),
         "search_domain_counts": recorder.domain_counts(),
