@@ -7,7 +7,7 @@ from typing import Any
 from vanguard.search_gateway import SearchPolicy
 from vanguard.state import AgentState
 
-from .models import ResearchAgentContext
+from .models import ResearchAgentContext, ResearchSearchBudget
 from .recorder import ResearchRunRecorder
 
 
@@ -19,11 +19,20 @@ def search_context_from_state(
     research_brief: str,
     filesystem_backend: Any,
     recorder: ResearchRunRecorder,
+    *,
+    default_query: str | None = None,
+    default_highlight_query: str | None = None,
+    focused_domains: tuple[str, ...] = (),
+    task_id: str | None = None,
+    search_budget: ResearchSearchBudget | None = None,
 ) -> ResearchAgentContext:
     return ResearchAgentContext(
         search_policy=_search_policy_from_state(state),
-        default_query=_search_query_from_state(state, research_brief),
-        default_highlight_query=research_brief,
+        default_query=default_query or _search_query_from_state(state, research_brief),
+        default_highlight_query=default_highlight_query or research_brief,
+        focused_domains=focused_domains,
+        task_id=task_id,
+        search_budget=search_budget or ResearchSearchBudget(max_search_calls=1),
         filesystem_backend=filesystem_backend,
         recorder=recorder,
     )

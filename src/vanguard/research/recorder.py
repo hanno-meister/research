@@ -16,6 +16,7 @@ class ResearchRunRecorder:
     """Collect deterministic search metadata across one research agent run."""
 
     sources_by_url: dict[str, SourceRecord] = field(default_factory=dict)
+    source_ids_by_url: dict[str, str] = field(default_factory=dict)
     evidence_artifacts_by_url: dict[str, EvidenceArtifactRecord] = field(default_factory=dict)
     search_attempts: int = 0
 
@@ -23,20 +24,23 @@ class ResearchRunRecorder:
         self,
         sources: list[SourceRecord],
         evidence_artifacts: list[EvidenceArtifactRecord],
-    ) -> None:
+    ) -> list[SourceRecord]:
         self.search_attempts += 1
         artifacts_by_path = {
             artifact["path"]: artifact
             for artifact in evidence_artifacts
             if isinstance(artifact.get("path"), str)
         }
+        recorded_sources = []
         for source in sources:
             merged_source = self.record_source(source)
+            recorded_sources.append(merged_source)
             raw_content_path = merged_source.get("raw_content_path")
             normalized_url = merged_source.get("normalized_url")
             artifact = artifacts_by_path.get(raw_content_path)
             if isinstance(normalized_url, str) and artifact:
                 self.evidence_artifacts_by_url[normalized_url] = dict(artifact)
+        return recorded_sources
 
     def record_source(self, source: SourceRecord) -> SourceRecord:
         normalized_url = source["normalized_url"]
@@ -45,7 +49,10 @@ class ResearchRunRecorder:
 
         existing = self.sources_by_url.get(normalized_url)
         if existing is None:
-            self.sources_by_url[normalized_url] = dict(source)
+            self.sources_by_url[normalized_url] = {
+                **source,
+                "source_id": self._source_id_for_url(normalized_url),
+            }
             return self.sources_by_url[normalized_url]
 
         self.sources_by_url[normalized_url] = _merge_source(existing, source)
@@ -78,6 +85,25 @@ class ResearchRunRecorder:
                 if (domain := _string_field(source, "canonical_domain"))
             )
         )
+
+    def known_source_ids(self) -> set[str]:
+        return set(self.source_ids_by_url.values())
+
+    def known_evidence_paths(self) -> set[str]:
+        return {
+            path
+            for artifact in self.evidence_artifacts()
+            if isinstance(path := artifact.get("path"), str)
+        }
+
+    def _source_id_for_url(self, normalized_url: str) -> str:
+        existing = self.source_ids_by_url.get(normalized_url)
+        if existing is not None:
+            return existing
+
+        source_id = f"S{len(self.source_ids_by_url) + 1}"
+        self.source_ids_by_url[normalized_url] = source_id
+        return source_id
 
 
 def _merge_source(existing: SourceRecord, incoming: SourceRecord) -> SourceRecord:

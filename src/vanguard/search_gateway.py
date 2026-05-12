@@ -14,15 +14,12 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Iterable, Protocol
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import SecretStr
 
 from config import config
-
-
-TRACKING_QUERY_PREFIXES = ("utm_",)
-TRACKING_QUERY_KEYS = {"fbclid", "gclid", "mc_cid", "mc_eid"}
+from vanguard.utils.collections import unique_preserving_order
+from vanguard.utils.urls import canonical_domain_from_url, normalize_domain, normalize_url
 
 
 class SearchGatewayError(ValueError):
@@ -47,7 +44,7 @@ class SearchPolicy:
         normalized_domains = tuple(
             normalize_domain(domain) for domain in self.allowed_domains if domain.strip()
         )
-        object.__setattr__(self, "allowed_domains", tuple(dict.fromkeys(normalized_domains)))
+        object.__setattr__(self, "allowed_domains", tuple(unique_preserving_order(normalized_domains)))
 
         if self.start_date and self.end_date and self.start_date > self.end_date:
             raise SearchGatewayError("start_date must be before or equal to end_date")
@@ -162,7 +159,7 @@ class SearchGateway:
             return ()
 
         normalized_focused_domains = tuple(
-            dict.fromkeys(normalize_domain(domain) for domain in focused_domains if domain.strip())
+            unique_preserving_order(normalize_domain(domain) for domain in focused_domains if domain.strip())
         )
         if not normalized_focused_domains:
             return ()
@@ -401,44 +398,6 @@ def dedupe_results(
         seen[key] = result
         unique_results.append(result)
     return unique_results, duplicates
-
-
-def normalize_domain(domain: str) -> str:
-    """Normalize user/provider domains for allowlist and reporting."""
-
-    value = domain.strip().lower()
-    if not value:
-        return value
-    if "://" in value:
-        value = urlsplit(value).netloc
-    value = value.split("/", 1)[0]
-    value = value.split(":", 1)[0]
-    if value.startswith("www."):
-        value = value[4:]
-    return value.rstrip(".")
-
-
-def canonical_domain_from_url(url: str) -> str:
-    """Extract a normalized domain from a URL."""
-
-    return normalize_domain(urlsplit(url).netloc)
-
-
-def normalize_url(url: str) -> str:
-    """Normalize URLs for deduplication without changing the destination."""
-
-    parts = urlsplit(url.strip())
-    scheme = parts.scheme.lower() or "https"
-    netloc = normalize_domain(parts.netloc)
-    path = parts.path.rstrip("/") or "/"
-    query_items = [
-        (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if key not in TRACKING_QUERY_KEYS
-        and not any(key.startswith(prefix) for prefix in TRACKING_QUERY_PREFIXES)
-    ]
-    query = urlencode(sorted(query_items), doseq=True)
-    return urlunsplit((scheme, netloc, path, query, ""))
 
 
 def _get_field(value: Any, name: str, default: Any = None) -> Any:

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 import pytest
 from types import SimpleNamespace
+from typing import cast
 
 from vanguard import research
+from vanguard import planning
 from vanguard.research import policy
 from vanguard.research import node, tools
 from vanguard.research.agent import filesystem_backend
 from vanguard.search_gateway import NormalizedSearchResult, SearchGatewayResult, SearchPolicy
+from vanguard.state import AgentState
 
 
 class FakeSearchGateway:
@@ -76,19 +80,54 @@ class FakeResearchAgent:
         )
         return {
             "structured_response": research.ResearchAgentOutput(
-                findings=["Compact source summary. [1]"],
+                findings=[
+                    research.ResearchFinding(
+                        summary="Compact source summary.",
+                        source_ids=["S1"],
+                        evidence_paths=["/evidence/real-research.md"],
+                    )
+                ],
                 source_diversity_notes=["Recorder-backed metadata only."],
             )
         }
+
+
+class ConcurrentFakeResearchAgent(FakeResearchAgent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_calls = 0
+        self.max_active_calls = 0
+
+    async def ainvoke(self, payload, **kwargs):
+        self.active_calls += 1
+        self.max_active_calls = max(self.max_active_calls, self.active_calls)
+        await asyncio.sleep(0)
+        result = await super().ainvoke(payload, **kwargs)
+        self.active_calls -= 1
+        return result
 
 
 class FakeNoSearchResearchAgent:
     async def ainvoke(self, payload, **kwargs):
         return {
             "structured_response": research.ResearchAgentOutput(
-                findings=["Unsupported finding."],
+                findings=[research.ResearchFinding(summary="Unsupported finding.")],
             )
         }
+
+
+class FakePlanningModel:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def with_structured_output(self, schema):
+        self.schema = schema
+        return self
+
+    async def ainvoke(self, payload):
+        self.calls.append(payload)
+        return self.response
 
 
 @pytest.mark.asyncio
@@ -123,11 +162,20 @@ async def test_conduct_research_invokes_agent_and_returns_compact_state(monkeypa
     assert kwargs["context"].filesystem_backend is create_calls[0][1]
     assert isinstance(kwargs["context"].recorder, research.ResearchRunRecorder)
     assert kwargs["context"].default_query == "search intent"
-    assert kwargs["context"].default_highlight_query == "focused research brief"
+    assert kwargs["context"].default_highlight_query == "focused research brief\nsearch intent"
+    assert kwargs["context"].focused_domains == ()
+    assert kwargs["context"].task_id == "task-1"
     assert kwargs["context"].search_policy.allowed_domains == ("example.com",)
     assert kwargs["context"].search_policy.start_date == date(2026, 1, 1)
     assert kwargs["context"].search_policy.end_date == date(2026, 12, 31)
-    assert "Compact source summary." in update["research_findings"][0]
+    assert update["research_findings"] == [
+        {
+            "task_id": "task-1",
+            "summary": "Compact source summary.",
+            "source_ids": ["S1"],
+            "evidence_paths": ["/evidence/real-research.md"],
+        }
+    ]
     assert update["research_sources"] == [
         {
             "provider": "exa",
@@ -139,6 +187,7 @@ async def test_conduct_research_invokes_agent_and_returns_compact_state(monkeypa
             "published_date": "2026-05-01",
             "normalized_url": "https://example.com/research",
             "canonical_domain": "example.com",
+            "source_id": "S1",
         }
     ]
     assert "raw_content" not in update["research_sources"][0]
@@ -154,7 +203,7 @@ async def test_conduct_research_invokes_agent_and_returns_compact_state(monkeypa
     ]
     assert update["search_provider_counts"] == {"exa": 1}
     assert update["search_domain_counts"] == {"example.com": 1}
-    assert update["source_diversity_notes"] == ["Recorder-backed metadata only."]
+    assert update["source_diversity_notes"] == ["task-1: Recorder-backed metadata only."]
 
 
 @pytest.mark.asyncio
@@ -196,6 +245,9 @@ async def test_search_gateway_tool_uses_constrained_gateway(monkeypatch, tmp_pat
         search_policy=search_policy,
         default_query="default query",
         default_highlight_query="default highlight",
+        focused_domains=("example.com",),
+        task_id=None,
+        search_budget=research.ResearchSearchBudget(max_search_calls=2),
         filesystem_backend=backend,
         recorder=research.ResearchRunRecorder(),
     )
@@ -208,6 +260,7 @@ async def test_search_gateway_tool_uses_constrained_gateway(monkeypatch, tmp_pat
     assert gateway.calls[0]["query"] == "custom query"
     assert gateway.calls[0]["highlight_query"] == "custom highlight"
     assert gateway.calls[0]["policy"] is search_policy
+    assert gateway.calls[0]["focused_domains"] == ("example.com",)
     assert response["provider_counts"] == {"exa": 1}
     assert response["results"][0]["raw_content_path"] is not None
     assert response["evidence_artifacts"][0]["content_characters"] == len(
@@ -219,6 +272,7 @@ async def test_search_gateway_tool_uses_constrained_gateway(monkeypatch, tmp_pat
     assert "This should not be serialized into graph state." in evidence.file_data["content"]
     assert response["evidence_artifacts"][0]["path"] == evidence_path
     assert context.recorder.sources() == response["results"]
+    assert response["results"][0]["source_id"] == "S1"
     assert context.recorder.evidence_artifacts() == response["evidence_artifacts"]
 
 
@@ -230,6 +284,9 @@ async def test_search_gateway_recorder_dedupes_across_tool_calls(monkeypatch, tm
         search_policy=SearchPolicy(),
         default_query="default query",
         default_highlight_query="default highlight",
+        focused_domains=(),
+        task_id=None,
+        search_budget=research.ResearchSearchBudget(max_search_calls=2),
         filesystem_backend=filesystem_backend(tmp_path),
         recorder=research.ResearchRunRecorder(),
     )
@@ -251,6 +308,9 @@ async def test_search_gateway_tool_whitespace_query_uses_default(monkeypatch, tm
         search_policy=SearchPolicy(),
         default_query="default query",
         default_highlight_query="default highlight",
+        focused_domains=(),
+        task_id=None,
+        search_budget=research.ResearchSearchBudget(max_search_calls=2),
         filesystem_backend=filesystem_backend(tmp_path),
         recorder=research.ResearchRunRecorder(),
     )
@@ -258,6 +318,32 @@ async def test_search_gateway_tool_whitespace_query_uses_default(monkeypatch, tm
     await tools._run_search_gateway_tool("   ", None, context)
 
     assert gateway.calls[0]["query"] == "default query"
+
+
+@pytest.mark.asyncio
+async def test_search_gateway_tool_enforces_search_budget(monkeypatch, tmp_path):
+    gateway = FakeSearchGateway()
+    monkeypatch.setattr(tools, "default_search_gateway", lambda: gateway)
+    context = research.ResearchAgentContext(
+        search_policy=SearchPolicy(),
+        default_query="default query",
+        default_highlight_query="default highlight",
+        focused_domains=(),
+        task_id="task-1",
+        search_budget=research.ResearchSearchBudget(max_search_calls=1),
+        filesystem_backend=filesystem_backend(tmp_path),
+        recorder=research.ResearchRunRecorder(),
+    )
+
+    first_response = await tools._run_search_gateway_tool("first query", None, context)
+    second_response = await tools._run_search_gateway_tool("second query", None, context)
+
+    assert "error" not in first_response
+    assert second_response["error"] == (
+        "Search budget exhausted for task task-1; maximum 1 calls allowed."
+    )
+    assert second_response["results"] == []
+    assert len(gateway.calls) == 1
 
 
 def test_search_gateway_tool_schema_hides_runtime_policy():
@@ -289,3 +375,188 @@ def test_search_query_from_state_prefers_intent_and_caps_length():
 
     assert len(query) <= policy.MAX_SEARCH_QUERY_CHARACTERS
     assert query.endswith("word")
+
+
+def test_sanitized_tasks_filters_and_normalizes_domains():
+    state = {
+        "allowed_domains": ["https://www.Example.com/path", "docs.example.com"],
+    }
+    task = planning.ResearchTask(
+        id="  task-1  ",
+        objective="  Study source coverage  ",
+        rationale="  why  ",
+        boundaries=["  scope  "],
+        key_questions=["  question  "],
+        preferred_source_types=["  docs  "],
+        focused_domains=["https://Example.com/article", "docs.example.com", "other.com"],
+        expected_output="  compact output  ",
+        effort="medium",
+    )
+
+    sanitized = planning._sanitized_tasks([task], cast(AgentState, state), "brief")
+
+    assert sanitized[0].id == "task-1"
+    assert sanitized[0].focused_domains == ["example.com", "docs.example.com"]
+    assert sanitized[0].boundaries == ["scope"]
+    assert sanitized[0].key_questions == ["question"]
+    assert sanitized[0].preferred_source_types == ["docs"]
+    assert sanitized[0].expected_output == "compact output"
+
+
+def test_sanitized_tasks_falls_back_to_safe_task_when_empty():
+    state = {"allowed_domains": ["https://www.Example.com/path"]}
+
+    sanitized = planning._sanitized_tasks([], cast(AgentState, state), "Preserve this brief")
+
+    assert len(sanitized) == 1
+    assert sanitized[0].id == "task-1"
+    assert sanitized[0].objective == "Preserve this brief"
+    assert sanitized[0].focused_domains == ["example.com"]
+
+
+@pytest.mark.asyncio
+async def test_plan_research_uses_structured_model_and_returns_tasks(monkeypatch):
+    response = planning.ResearchPlan(
+        tasks=[
+            planning.ResearchTask(
+                id="task-1",
+                objective="Find docs",
+                rationale="Needed",
+                expected_output="Compact output",
+                effort="low",
+            )
+        ]
+    )
+    fake_model = FakePlanningModel(response)
+    monkeypatch.setattr(planning, "ChatOpenAI", lambda **kwargs: fake_model)
+
+    runtime = SimpleNamespace(
+        context=SimpleNamespace(
+            small_model="small",
+            large_model="large",
+            openai_base_url="http://example.invalid",
+            azure_openai_api_key="dummy",
+        )
+    )
+
+    update = await planning.plan_research(
+        {
+            "research_intent": "intent",
+            "research_brief": "brief",
+            "allowed_domains": ["example.com"],
+        },
+        runtime,
+    )
+
+    assert len(fake_model.calls) == 1
+    assert "brief" in fake_model.calls[0][0].content
+    assert update["research_tasks"][0]["objective"] == "Find docs"
+
+
+@pytest.mark.asyncio
+async def test_conduct_research_includes_research_tasks_in_prompt(monkeypatch):
+    agent = FakeResearchAgent()
+
+    monkeypatch.setattr(node, "create_research_agent", lambda config, backend=None: agent)
+    runtime = SimpleNamespace(context=SimpleNamespace())
+
+    await research.conduct_research(
+        {
+            "research_intent": "search intent",
+            "research_brief": "focused research brief",
+            "research_tasks": [
+                {
+                    "id": "task-1",
+                    "objective": "Find docs",
+                    "boundaries": ["docs only"],
+                    "key_questions": ["What is the API?"],
+                    "effort": "low",
+                }
+            ],
+        },
+        runtime,
+    )
+
+    payload, _kwargs = agent.calls[0]
+    content = payload["messages"][0].content
+    assert "focused research brief" in content
+    assert "Focused worker task" in content
+    assert "Find docs" in content
+
+
+@pytest.mark.asyncio
+async def test_conduct_research_runs_one_worker_per_task(monkeypatch):
+    agent = FakeResearchAgent()
+
+    monkeypatch.setattr(node, "create_research_agent", lambda config, backend=None: agent)
+    runtime = SimpleNamespace(context=SimpleNamespace())
+
+    update = await research.conduct_research(
+        {
+            "research_intent": "search intent",
+            "research_brief": "focused research brief",
+            "allowed_domains": ["example.com", "docs.example.com"],
+            "research_tasks": [
+                {
+                    "id": "task-1",
+                    "objective": "Find architecture docs",
+                    "key_questions": ["What primitives exist?"],
+                    "focused_domains": ["example.com"],
+                    "expected_output": "Architecture findings",
+                },
+                {
+                    "id": "task-2",
+                    "objective": "Find persistence docs",
+                    "key_questions": ["How are checkpoints used?"],
+                    "focused_domains": ["docs.example.com"],
+                    "expected_output": "Persistence findings",
+                },
+            ],
+        },
+        runtime,
+    )
+
+    assert len(agent.calls) == 2
+    first_payload, first_kwargs = agent.calls[0]
+    second_payload, second_kwargs = agent.calls[1]
+    assert "Find architecture docs" in first_payload["messages"][0].content
+    assert first_kwargs["context"].task_id == "task-1"
+    assert first_kwargs["context"].focused_domains == ("example.com",)
+    assert first_kwargs["context"].default_query == "Find architecture docs What primitives exist?"
+    assert "Find persistence docs" in second_payload["messages"][0].content
+    assert second_kwargs["context"].task_id == "task-2"
+    assert second_kwargs["context"].focused_domains == ("docs.example.com",)
+    assert [finding["task_id"] for finding in update["research_findings"]] == [
+        "task-1",
+        "task-2",
+    ]
+    assert update["research_findings"][0]["source_ids"] == ["S1"]
+    assert update["research_findings"][0]["evidence_paths"] == [
+        "/evidence/real-research.md"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conduct_research_runs_workers_concurrently(monkeypatch):
+    agent = ConcurrentFakeResearchAgent()
+
+    monkeypatch.setattr(node, "create_research_agent", lambda config, backend=None: agent)
+    runtime = SimpleNamespace(context=SimpleNamespace())
+
+    await research.conduct_research(
+        {
+            "research_intent": "search intent",
+            "research_brief": "focused research brief",
+            "research_tasks": [
+                {"id": "task-1", "objective": "Find architecture docs"},
+                {"id": "task-2", "objective": "Find persistence docs"},
+            ],
+        },
+        runtime,
+    )
+
+    assert agent.max_active_calls == 2
+    assert [kwargs["context"].search_budget.max_search_calls for _, kwargs in agent.calls] == [
+        node.MAX_SEARCH_CALLS_PER_WORKER,
+        node.MAX_SEARCH_CALLS_PER_WORKER,
+    ]

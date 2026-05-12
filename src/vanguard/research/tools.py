@@ -34,6 +34,26 @@ async def _run_search_gateway_tool(
     highlight_query: str | None,
     context: ResearchAgentContext,
 ) -> dict[str, Any]:
+    if not await context.search_budget.reserve_search_call():
+        logger.info(
+            "Search gateway budget exhausted",
+            extra={
+                "task_id": context.task_id,
+                "max_search_calls": context.search_budget.max_search_calls,
+            },
+        )
+        return {
+            "error": (
+                f"Search budget exhausted for task {context.task_id or 'unknown'}; "
+                f"maximum {context.search_budget.max_search_calls} calls allowed."
+            ),
+            "results": [],
+            "evidence_artifacts": [],
+            "provider_counts": {},
+            "domain_counts": {},
+            "duplicates_removed": 0,
+        }
+
     resolved_query = _resolve_query(query, context.default_query)
     resolved_highlight_query = highlight_query or context.default_highlight_query
     logger.info(
@@ -54,6 +74,7 @@ async def _run_search_gateway_tool(
     result = await default_search_gateway().search(
         query=resolved_query,
         policy=context.search_policy,
+        focused_domains=context.focused_domains,
         highlight_query=resolved_highlight_query,
     )
     evidence_by_url = {
@@ -66,9 +87,9 @@ async def _run_search_gateway_tool(
         for item in result.results
     ]
     evidence_artifacts = list(evidence_by_url.values())
-    context.recorder.record_search_results(serialized_results, evidence_artifacts)
+    recorded_results = context.recorder.record_search_results(serialized_results, evidence_artifacts)
     response = {
-        "results": serialized_results,
+        "results": recorded_results,
         "evidence_artifacts": evidence_artifacts,
         "provider_counts": result.provider_counts,
         "domain_counts": result.domain_counts,

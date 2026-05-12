@@ -5,6 +5,8 @@ from .models import (
     ResearchAgentEvidenceArtifact,
     ResearchAgentOutput,
     ResearchAgentSource,
+    ResearchFinding,
+    ResearchSearchBudget,
 )
 from .node import conduct_research
 from .recorder import ResearchRunRecorder
@@ -15,6 +17,8 @@ __all__ = [
     "ResearchAgentEvidenceArtifact",
     "ResearchAgentOutput",
     "ResearchAgentSource",
+    "ResearchFinding",
+    "ResearchSearchBudget",
     "ResearchRunRecorder",
     "conduct_research",
     "search_gateway",

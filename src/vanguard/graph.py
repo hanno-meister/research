@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, START, END
 
 from .brief import write_research_brief
 from .langgraph_configuration import LangGraphConfig
+from .planning import plan_research
 from .report import final_report_generation
 from .research import conduct_research
 from .state import AgentInputState, AgentState
@@ -15,11 +16,13 @@ builder = StateGraph(
     input_schema=AgentInputState,
 )
 builder.add_node("write_research_brief", write_research_brief)
+builder.add_node("plan_research", plan_research)
 builder.add_node("conduct_research", conduct_research)
 builder.add_node("final_report_generation", final_report_generation)
 
 builder.add_edge(START, "write_research_brief")
-builder.add_edge("write_research_brief", "conduct_research")
+builder.add_edge("write_research_brief", "plan_research")
+builder.add_edge("plan_research", "conduct_research")
 builder.add_edge("conduct_research", "final_report_generation")
 builder.add_edge("final_report_generation", END)
 
