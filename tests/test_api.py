@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+from datetime import date
+
+from fastapi.testclient import TestClient
+
+from vanguard.api import app, get_compiled_graph, get_runtime_config
+
+
+class FakeGraph:
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict[str, object], object]] = []
+
+    async def ainvoke(self, graph_input: dict[str, object], *, context: object):
+        self.calls.append((graph_input, context))
+        return {
+            "final_report": "Final answer",
+            "research_brief": "Research brief",
+            "research_tasks": [{"task_id": "task-1", "description": "Task"}],
+            "research_findings": [{"summary": "Finding", "source_ids": ["S1"]}],
+            "research_sources": [{"source_id": "S1", "url": "https://example.com"}],
+            "evidence_artifacts": [{"source_id": "S1", "path": "/evidence/source.md"}],
+            "research_reviews": [{"sufficient": True}],
+            "search_provider_counts": {"exa": 1},
+            "search_domain_counts": {"example.com": 1},
+        }
+
+
+def test_research_endpoint_maps_request_to_graph_input():
+    fake_graph = FakeGraph()
+    fake_config = object()
+    app.dependency_overrides[get_compiled_graph] = lambda: fake_graph
+    app.dependency_overrides[get_runtime_config] = lambda: fake_config
+
+    try:
+        response = TestClient(app).post(
+            "/research",
+            json={
+                "human_message": "Research LangGraph agents",
+                "allowed_domains": ["langchain.com", "docs.langchain.com"],
+                "start_date": "2026-01-01",
+                "end_date": "2026-05-01",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["final_report"] == "Final answer"
+    assert fake_graph.calls == [
+        (
+            {
+                "research_intent": "Research LangGraph agents",
+                "allowed_domains": ["langchain.com", "docs.langchain.com"],
+                "start_date": date(2026, 1, 1),
+                "end_date": date(2026, 5, 1),
+            },
+            fake_config,
+        )
+    ]
+
+
+def test_research_endpoint_accepts_request_without_optional_constraints():
+    fake_graph = FakeGraph()
+    app.dependency_overrides[get_compiled_graph] = lambda: fake_graph
+    app.dependency_overrides[get_runtime_config] = lambda: object()
+
+    try:
+        response = TestClient(app).post("/research", json={"human_message": "Summarize current AI search APIs"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert fake_graph.calls[0][0] == {"research_intent": "Summarize current AI search APIs"}
