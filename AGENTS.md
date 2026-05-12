@@ -4,7 +4,7 @@
 
 - Python 3.11 project managed by `uv`; update `uv.lock` with `pyproject.toml` dependency changes.
 - The real app entrypoint is `src/vanguard/graph.py` (`builder` plus a `__main__` demo); root `main.py` is only a hello-world placeholder.
-- `graph.py` wires `write_research_brief -> conduct_research -> final_report_generation`.
+- `graph.py` wires `write_research_brief -> plan_research -> conduct_research -> review_research -> final_report_generation`.
 - State/config/prompt contracts live in `src/vanguard/state.py`, `src/vanguard/langgraph_configuration.py`, and `src/vanguard/prompts.py`.
 - `src/vanguard/search_gateway.py` is standalone Exa/Tavily provider plumbing; tests inject fake clients and must not call external search APIs.
 - Research evidence is written through DeepAgents filesystem middleware under virtual `/evidence/` paths backed by local `.vanguard/` (ignored by git).
@@ -30,6 +30,10 @@
 
 - `opencode.json` enables the repo-local `langchain-docs` MCP; use it for current LangChain/LangGraph API details before changing graph code.
 - `write_research_brief` uses `ChatOpenAI(..., use_responses_api=False)` with structured output `ResearchQuestion`.
-- `create_research_agent` uses `create_agent(..., response_format=ResearchAgentOutput)` plus `FilesystemMiddleware`; preserve structured responses and compact graph state.
-- Additive `AgentState` fields (`research_findings`, `research_sources`, `evidence_artifacts`, `source_diversity_notes`) must be returned as lists to append, not scalars.
-- `search_gateway` tool schema intentionally exposes only `query` and `highlight_query`; runtime policy/domain/date constraints are injected via context and covered by tests.
+- `plan_research` uses the large model with structured `ResearchPlan`; sanitized `focused_domains` must stay within `allowed_domains`, and empty/invalid plans fall back to `task-1`.
+- `conduct_research` runs one bounded worker per planned task; each worker must call `search_gateway` and has `MAX_SEARCH_CALLS_PER_WORKER = 2`.
+- `create_research_agent` uses `create_agent(..., response_format=ResearchAgentOutput)` plus `FilesystemMiddleware`; worker findings cite recorder-owned `source_id` and `/evidence/...` paths, not raw content.
+- `review_research` can read only known `/evidence/...` artifacts, stores read records without snippet content, and caps review/follow-up work in `src/vanguard/review/defaults.py`.
+- Additive `AgentState` fields (`research_findings`, `research_sources`, `evidence_artifacts`, `source_diversity_notes`, `research_reviews`, `evidence_read_records`) must be returned as lists to append, not scalars.
+- `search_gateway` tool schema intentionally exposes only `query` and `highlight_query`; runtime policy/domain/date constraints, focused domains, budgets, and recorders are injected via context and covered by tests.
+- `SearchGateway` validates provider kwargs, focused-domain subsets, normalization, and dedupe, but does not independently reject provider-returned domain/date mismatches.
