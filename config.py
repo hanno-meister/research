@@ -1,5 +1,6 @@
 import tomllib
 from os import getenv
+from pathlib import Path
 from pydantic import BaseModel, SecretStr
 from dotenv import load_dotenv
 
@@ -13,7 +14,7 @@ class Config(BaseModel):
     exa_api_key: SecretStr | None = None
     tavily_api_key: SecretStr | None = None
 
-with open("pyproject.toml", "rb") as f:
+with Path(__file__).with_name("pyproject.toml").open("rb") as f:
     pyproject = tomllib.load(f)
 
 config = Config.model_validate({
