@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from datetime import date
 from functools import lru_cache
+import logging
 
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
 
 from .graph import builder
 from .langgraph_configuration import LangGraphConfig
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 
 class ResearchRequest(BaseModel):
