@@ -1,0 +1,56 @@
+"""LangChain research agent construction."""
+
+from pathlib import Path
+
+from deepagents.backends import CompositeBackend, StateBackend
+from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.middleware.filesystem import FilesystemMiddleware
+from langchain.agents import create_agent
+from langchain_openai import ChatOpenAI
+
+from vanguard.langgraph_configuration import LangGraphConfig
+
+from .models import ResearchAgentContext, ResearchAgentOutput
+from .tools import search_gateway
+
+
+RESEARCH_AGENT_SYSTEM_PROMPT = """You are a constrained research worker inside a larger LangGraph workflow.
+
+Rules:
+- Use the search_gateway tool for source discovery. Do not invent sources.
+- The search_gateway tool stores raw evidence and returns compact metadata plus evidence paths.
+- Keep returned findings compact. Never include raw source content in the structured response.
+- Return only synthesis fields. Source metadata, evidence artifacts, provider counts, and domain counts are tracked automatically.
+- Return structured output only.
+"""
+
+
+def create_research_agent(config: LangGraphConfig, backend: CompositeBackend | None = None):
+    backend = backend or filesystem_backend()
+    model = ChatOpenAI(
+        model=config.small_model,
+        base_url=config.openai_base_url,
+        api_key=config.azure_openai_api_key,
+        use_responses_api=False,
+    )
+    return create_agent(
+        model=model,
+        tools=[search_gateway],
+        middleware=[FilesystemMiddleware(backend=backend)],
+        response_format=ResearchAgentOutput,
+        context_schema=ResearchAgentContext,
+        system_prompt=RESEARCH_AGENT_SYSTEM_PROMPT,
+    )
+
+
+def filesystem_backend(root_dir: Path | None = None) -> CompositeBackend:
+    evidence_root = root_dir or Path(".vanguard").resolve()
+    return CompositeBackend(
+        default=StateBackend(),
+        routes={
+            "/evidence/": FilesystemBackend(
+                root_dir=evidence_root,
+                virtual_mode=True,
+            )
+        },
+    )

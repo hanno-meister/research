@@ -195,11 +195,13 @@ class ExaSearchAdapter:
         *,
         num_results: int = 5,
         highlights_max_characters: int = 1_000,
+        text_max_characters: int | None = 20_000,
         include_summary: bool = True,
     ) -> None:
         self.client = client
         self.num_results = num_results
         self.highlights_max_characters = highlights_max_characters
+        self.text_max_characters = text_max_characters
         self.include_summary = include_summary
 
     async def search(
@@ -234,6 +236,8 @@ class ExaSearchAdapter:
                 "query": query,
             }
         }
+        if self.text_max_characters is not None:
+            contents["text"] = {"maxCharacters": self.text_max_characters}
         if self.include_summary:
             contents["summary"] = True
         return contents
@@ -259,6 +263,7 @@ class ExaSearchAdapter:
             url=str(_get_field(result, "url", "")),
             title=_get_field(result, "title", None),
             summary=summary,
+            raw_content=_get_field(result, "text", None),
             published_date=_get_field(result, "published_date", None)
             or _get_field(result, "publishedDate", None),
         )

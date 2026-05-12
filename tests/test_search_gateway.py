@@ -64,6 +64,7 @@ async def test_exa_adapter_injects_only_present_policy_constraints():
                     "url": "https://example.com/a?utm_source=x&id=1",
                     "title": "A",
                     "highlights": ["Relevant excerpt"],
+                    "text": "Full Exa source text.",
                     "publishedDate": "2025-03-01",
                 }
             ]
@@ -85,6 +86,7 @@ async def test_exa_adapter_injects_only_present_policy_constraints():
                 "num_results": 7,
                 "contents": {
                     "highlights": {"max_characters": 750, "query": "focused evidence"},
+                    "text": {"maxCharacters": 20000},
                     "summary": True,
                 },
                 "include_domains": ["example.com"],
@@ -94,6 +96,7 @@ async def test_exa_adapter_injects_only_present_policy_constraints():
     ]
     assert results[0].provider == "exa"
     assert results[0].summary == "Relevant excerpt"
+    assert results[0].raw_content == "Full Exa source text."
     assert results[0].published_date == "2025-03-01"
     assert results[0].normalized_url == "https://example.com/a?id=1"
 
@@ -102,6 +105,17 @@ def test_exa_adapter_uses_compact_content_defaults():
     adapter = ExaSearchAdapter()
 
     assert adapter.num_results == 5
+    assert adapter.text_max_characters == 20_000
+    assert adapter._contents("focused question") == {
+        "highlights": {"max_characters": 1000, "query": "focused question"},
+        "text": {"maxCharacters": 20000},
+        "summary": True,
+    }
+
+
+def test_exa_adapter_can_disable_full_text():
+    adapter = ExaSearchAdapter(text_max_characters=None)
+
     assert adapter._contents("focused question") == {
         "highlights": {"max_characters": 1000, "query": "focused question"},
         "summary": True,

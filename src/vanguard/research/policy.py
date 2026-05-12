@@ -1,0 +1,54 @@
+"""Search policy and query derivation for research runs."""
+
+from datetime import date
+
+from typing import Any
+
+from vanguard.search_gateway import SearchPolicy
+from vanguard.state import AgentState
+
+from .models import ResearchAgentContext
+from .recorder import ResearchRunRecorder
+
+
+MAX_SEARCH_QUERY_CHARACTERS = 400
+
+
+def search_context_from_state(
+    state: AgentState,
+    research_brief: str,
+    filesystem_backend: Any,
+    recorder: ResearchRunRecorder,
+) -> ResearchAgentContext:
+    return ResearchAgentContext(
+        search_policy=_search_policy_from_state(state),
+        default_query=_search_query_from_state(state, research_brief),
+        default_highlight_query=research_brief,
+        filesystem_backend=filesystem_backend,
+        recorder=recorder,
+    )
+
+
+def _search_query_from_state(state: AgentState, research_brief: str) -> str:
+    return _bounded_query(state.get("research_intent") or research_brief)
+
+
+def _search_policy_from_state(state: AgentState) -> SearchPolicy:
+    return SearchPolicy(
+        allowed_domains=tuple(state.get("allowed_domains", ())),
+        start_date=_optional_date(state.get("start_date")),
+        end_date=_optional_date(state.get("end_date")),
+    )
+
+
+def _optional_date(value: date | str | None) -> date | None:
+    if value is None or isinstance(value, date):
+        return value
+    return date.fromisoformat(value)
+
+
+def _bounded_query(query: str) -> str:
+    query = " ".join(query.split())
+    if len(query) <= MAX_SEARCH_QUERY_CHARACTERS:
+        return query
+    return query[:MAX_SEARCH_QUERY_CHARACTERS].rsplit(" ", 1)[0]
