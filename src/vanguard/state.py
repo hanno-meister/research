@@ -27,13 +27,6 @@ class Summary(BaseModel):
     summary: str
     key_excerpts: str
 
-class ResearchQuestion(BaseModel):
-    """Research question and brief for guiding research."""
-
-    research_brief: str = Field(
-        description="A research question that will be used to guide the research.",
-    )
-
 ###################
 # State Definitions
 ###################
@@ -45,6 +38,39 @@ class AgentInputState(TypedDict):
     end_date: NotRequired[date | str]
 
 class AgentState(TypedDict):
+    """Shared LangGraph state for the research workflow.
+
+    Fields:
+        research_intent: User's original research request.
+        allowed_domains: Optional hard allowlist for search result domains.
+        start_date: Optional lower publication-date bound for searches.
+        end_date: Optional upper publication-date bound for searches.
+        research_brief: Normalized research question/brief generated from the intent.
+        research_tasks: Planned worker tasks. Replaced as a whole, not appended.
+        research_findings: Append-only compact findings from research workers.
+            Each finding should include a summary plus recorder-owned source_ids and
+            evidence_paths.
+        research_sources: Append-only source metadata recorded from search results.
+            Source IDs are Python-owned and used for citations and review decisions.
+        evidence_artifacts: Append-only metadata for available virtual evidence files
+            under ``/evidence/...``. This does not contain raw evidence content.
+        research_feasibility_notes: Append-only notes about source-policy constraints
+            or impossible coverage under the current runtime policy.
+        source_diversity_notes: Append-only notes about domain/source skew, duplicates,
+            weak source coverage, or follow-up source-diversity repairs.
+        research_reviews: Append-only structured review records, including sufficiency,
+            source-quality assessment, evidence-read requests, follow-up tasks, and
+            reviewer-selected report sources.
+        evidence_read_records: Append-only metadata for evidence files selected and
+            read during review/final reporting. Does not contain raw snippet content.
+        search_provider_counts: Latest aggregate accepted-source counts by provider.
+        search_domain_counts: Latest aggregate accepted-source counts by domain.
+        final_report: Rendered Markdown final or incomplete report.
+
+    List-valued fields annotated with ``operator.add`` are append-only graph outputs;
+    nodes should return lists for those fields so LangGraph can merge them correctly.
+    """
+
     research_intent: str
     allowed_domains: NotRequired[list[str]]
     start_date: NotRequired[date | str]

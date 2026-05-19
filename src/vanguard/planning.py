@@ -3,60 +3,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
 
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.runtime import Runtime
-from pydantic import BaseModel, Field
 
+from .contracts import MAX_RESEARCH_TASKS, ResearchPlan, ResearchTask
 from .langgraph_configuration import LangGraphConfig
 from .prompts import RESEARCH_PLAN_PROMPT
 from .state import AgentState
 from .utils.collections import clean_strings, unique_preserving_order
-from .utils.urls import normalize_domain
+from .utils.urls import normalize_domain, normalize_domains
 
 
 logger = logging.getLogger(__name__)
-
-
-ResearchEffort = Literal["low", "medium", "high"]
-
-
-class ResearchTask(BaseModel):
-    """A bounded unit of work for a future research worker agent."""
-
-    id: str = Field(description="Stable short task identifier, such as task-1.")
-    objective: str = Field(description="Specific research objective for this worker task.")
-    rationale: str = Field(description="Why this task is needed for the overall brief.")
-    boundaries: list[str] = Field(
-        default_factory=list,
-        description="What this task should and should not cover to avoid overlap.",
-    )
-    key_questions: list[str] = Field(
-        default_factory=list,
-        description="Focused questions this task should answer.",
-    )
-    preferred_source_types: list[str] = Field(
-        default_factory=list,
-        description="Source types to prioritize, e.g. official docs, papers, primary sources.",
-    )
-    focused_domains: list[str] = Field(
-        default_factory=list,
-        description="Optional focus-domain hints. These do not override runtime policy.",
-    )
-    expected_output: str = Field(
-        description="Compact description of the structured findings expected from the worker.",
-    )
-    effort: ResearchEffort = Field(description="Relative effort budget for this task.")
-
-
-class ResearchPlan(BaseModel):
-    """Structured output produced by the planning node."""
-
-    tasks: list[ResearchTask] = Field(
-        description="Bounded non-overlapping research tasks for worker agents."
-    )
 
 
 async def plan_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
@@ -81,6 +41,7 @@ async def plan_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
                     research_intent=state["research_intent"],
                     research_brief=research_brief,
                     runtime_constraints=_runtime_constraints_text(state),
+                    max_research_tasks=MAX_RESEARCH_TASKS,
                 )
             )
         ]
@@ -110,78 +71,39 @@ def _runtime_constraints_text(state: AgentState) -> str:
 
 
 def _sanitized_tasks(
-    tasks: list[ResearchTask], state: AgentState, research_brief: str, *, collapse: bool = True
+    tasks: list[ResearchTask],
+    state: AgentState,
+    research_brief: str,
+    *,
+    id_prefix: str = "task",
 ) -> list[ResearchTask]:
-    allowed_domains = _normalized_allowed_domains(state)
-    sanitized = [_sanitize_task(task, index, allowed_domains) for index, task in enumerate(tasks, start=1)]
+    allowed_domains = normalize_domains(state.get("allowed_domains", []))
+    sanitized = [
+        _sanitize_task(task, index, allowed_domains, id_prefix=id_prefix)
+        for index, task in enumerate(tasks, start=1)
+    ]
     sanitized = [task for task in sanitized if task.objective.strip()]
     if not sanitized:
-        return [_fallback_task(research_brief, allowed_domains)]
-    if collapse and len(sanitized) > 1 and _should_collapse_to_single_task(state, research_brief):
-        return [_fallback_task(research_brief, allowed_domains)]
-    return sanitized[:3]
-
-
-def _should_collapse_to_single_task(state: AgentState, research_brief: str) -> bool:
-    intent = str(state.get("research_intent") or "")
-    text = f"{intent}\n{research_brief}".lower()
-    explicit_split_cues = (
-        " compare ",
-        " comparison ",
-        " versus ",
-        " vs ",
-        " pros and cons",
-        " across regions",
-        " by country",
-        " by region",
-    )
-    if any(cue in f" {text} " for cue in explicit_split_cues):
-        return False
-    return len(intent.split()) <= 6 or any(term in text for term in ["recent news", "latest news", "overview", "summarize"])
+        raise ValueError("Planning produced no usable research tasks")
+    return sanitized
 
 
 def feasibility_notes_for_state(state: AgentState, research_brief: str) -> list[str]:
-    allowed_domains = set(_normalized_allowed_domains(state))
-    if not allowed_domains:
-        return []
+    """Return broad source-policy feasibility notes for the current plan.
 
-    text = f"{state.get('research_intent') or ''}\n{research_brief}".lower()
-    notes = []
-    financial_terms = ("earnings", "revenue", "guidance", "margin", "eps", "stock", "investor", "financial")
-    legal_terms = ("legal", "regulatory", "regulator", "lawsuit", "court", "export control", "antitrust", "filing")
-    market_terms = ("market-moving", "market reaction", "analyst", "price", "valuation")
-
-    if any(term in text for term in financial_terms + market_terms) and not _has_allowed_domain(
-        allowed_domains,
-        ("sec.gov", "investor.", "reuters.com", "apnews.com", "wsj.com", "ft.com", "bloomberg.com"),
-    ):
-        notes.append(
-            "Financial or market-reaction coverage may be incomplete because the allowed domains do not include primary investor filings or established financial-news sources."
-        )
-    if any(term in text for term in legal_terms) and not _has_allowed_domain(
-        allowed_domains,
-        ("sec.gov", "justice.gov", "commerce.gov", "bis.doc.gov", "reuters.com", "apnews.com", "wsj.com", "ft.com", "bloomberg.com"),
-    ):
-        notes.append(
-            "Legal or regulatory coverage may be incomplete because the allowed domains do not include primary regulator, court, filing, or established legal-news sources."
-        )
-    return notes
-
-
-def _has_allowed_domain(allowed_domains: set[str], candidates: tuple[str, ...]) -> bool:
-    for domain in allowed_domains:
-        if any(
-            domain == candidate
-            or domain.endswith("." + candidate)
-            or (candidate.endswith(".") and candidate in domain)
-            for candidate in candidates
-        ):
-            return True
-    return False
+    This hook originally warned when a requested evidence category appeared
+    infeasible under the current runtime constraints. Domain-specific heuristics
+    were removed because they were too narrow for this general research workflow
+    and produced false positives. Future checks should stay source-neutral, for
+    example warning when allowed_domains are present and the brief asks for
+    primary/official verification that may not be possible from the provided
+    source universe.
+    """
+    return []
 
 
 def _sanitize_task(
-    task: ResearchTask, index: int, allowed_domains: tuple[str, ...]
+    task: ResearchTask, index: int, allowed_domains: tuple[str, ...], *, id_prefix: str = "task"
 ) -> ResearchTask:
     focused_domains = tuple(
         unique_preserving_order(
@@ -195,37 +117,13 @@ def _sanitize_task(
 
     return task.model_copy(
         update={
-            "id": task.id.strip() or f"task-{index}",
+            "id": f"{id_prefix}-{index}",
             "objective": task.objective.strip(),
             "rationale": task.rationale.strip(),
             "boundaries": clean_strings(task.boundaries),
             "key_questions": clean_strings(task.key_questions),
-            "preferred_source_types": clean_strings(task.preferred_source_types),
             "focused_domains": list(focused_domains),
             "expected_output": task.expected_output.strip()
             or "Compact findings with source IDs and evidence paths.",
         }
-    )
-
-
-def _normalized_allowed_domains(state: AgentState) -> tuple[str, ...]:
-    return tuple(
-        unique_preserving_order(
-            normalize_domain(domain)
-            for domain in state.get("allowed_domains", [])
-            if domain and domain.strip()
-        )
-    )
-
-def _fallback_task(research_brief: str, allowed_domains: tuple[str, ...]) -> ResearchTask:
-    return ResearchTask(
-        id="task-1",
-        objective=research_brief.strip(),
-        rationale="Fallback task preserving the full research brief because planning produced no usable tasks.",
-        boundaries=["Cover the full research brief without inventing additional constraints."],
-        key_questions=[],
-        preferred_source_types=["authoritative and primary sources where available"],
-        focused_domains=list(allowed_domains),
-        expected_output="Compact structured findings with source IDs, evidence paths, confidence, and limitations.",
-        effort="medium",
     )

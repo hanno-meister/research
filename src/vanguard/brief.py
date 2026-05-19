@@ -6,9 +6,10 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.runtime import Runtime
 
+from .contracts import ResearchQuestion
 from .langgraph_configuration import LangGraphConfig
 from .prompts import RESEARCH_BRIEF_PROMPT
-from .state import AgentState, ResearchQuestion
+from .state import AgentState
 
 
 logger = logging.getLogger(__name__)

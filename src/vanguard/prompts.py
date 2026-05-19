@@ -24,13 +24,13 @@ Research brief:
 Runtime constraints supplied by the application, not by you:
 {runtime_constraints}
 
-Create the smallest useful set of non-overlapping research tasks that worker agents can execute independently.
+Create a useful set of non-overlapping research tasks that worker agents can execute independently.
 
 Rules:
 - Preserve the research brief's goal.
-- Bias toward 1 comprehensive task for simple fact-finding, summaries, lists, or broad open-ended research.
-- Split only when the user explicitly asks for comparison, or the brief has clearly independent dimensions that cannot be covered efficiently by one worker.
-- Prefer 1 task by default, 2-3 tasks for explicit comparisons or independent dimensions, and never more than 3 tasks.
+- Use enough tasks to cover clearly independent systems, subtopics, or evidence needs without duplicating work.
+- Prefer fewer tasks when one worker can cover the brief well, but split when separate workers would improve coverage or source discovery.
+- Never return more than {max_research_tasks} tasks.
 - Give each task clear boundaries so workers do not duplicate each other.
 - Prefer tasks that can be answered from primary, official, regulatory, academic, or established expert sources when available.
 - Include source-quality expectations in expected_output when the question depends on recency, claims, forecasts, prices, market reaction, or disputed facts.
