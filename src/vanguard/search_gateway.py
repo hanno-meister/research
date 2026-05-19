@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
@@ -20,6 +21,9 @@ from pydantic import SecretStr
 from config import config
 from vanguard.utils.collections import unique_preserving_order
 from vanguard.utils.urls import canonical_domain_from_url, normalize_domain, normalize_url
+
+
+logger = logging.getLogger(__name__)
 
 
 class SearchGatewayError(ValueError):
@@ -84,6 +88,23 @@ class DuplicateSearchResult:
 
 
 @dataclass(frozen=True)
+class RejectedSearchResult:
+    """A result rejected by gateway-side policy enforcement."""
+
+    result: NormalizedSearchResult
+    reason: str
+
+
+@dataclass(frozen=True)
+class ProviderSearchError:
+    """A provider failure captured so one bad provider does not abort a run."""
+
+    provider: str
+    error_type: str
+    message: str
+
+
+@dataclass(frozen=True)
 class SearchGatewayResult:
     """Gateway response after provider calls, normalization, and dedupe."""
 
@@ -91,6 +112,8 @@ class SearchGatewayResult:
     duplicates: list[DuplicateSearchResult]
     provider_counts: dict[str, int]
     domain_counts: dict[str, int]
+    rejected_results: list[RejectedSearchResult] = field(default_factory=list)
+    provider_errors: list[ProviderSearchError] = field(default_factory=list)
 
 
 class SearchProvider(Protocol):
@@ -136,19 +159,65 @@ class SearchGateway:
 
         provider_results = await asyncio.gather(
             *(
-                provider.search(query, policy, normalized_focused_domains, highlight_query)
+                self._safe_provider_search(
+                    provider,
+                    query,
+                    policy,
+                    normalized_focused_domains,
+                    highlight_query,
+                )
                 for provider in self.providers
             )
         )
-        flattened_results = [result for results in provider_results for result in results]
-        results, duplicates = dedupe_results(flattened_results)
+        flattened_results = [result for results, _error in provider_results for result in results]
+        provider_errors = [error for _results, error in provider_results if error is not None]
+        accepted_results, rejected_results = enforce_domain_policy(
+            flattened_results,
+            policy=policy,
+            focused_domains=normalized_focused_domains,
+        )
+        results, duplicates = dedupe_results(accepted_results)
 
         return SearchGatewayResult(
             results=results,
             duplicates=duplicates,
             provider_counts=dict(Counter(result.provider for result in results)),
             domain_counts=count_domains(results),
+            rejected_results=rejected_results,
+            provider_errors=provider_errors,
         )
+
+    @staticmethod
+    async def _safe_provider_search(
+        provider: SearchProvider,
+        query: str,
+        policy: SearchPolicy,
+        focused_domains: tuple[str, ...],
+        highlight_query: str | None,
+    ) -> tuple[list[NormalizedSearchResult], ProviderSearchError | None]:
+        try:
+            results = await provider.search(query, policy, focused_domains, highlight_query)
+            logger.info(
+                "Search provider completed: provider=%s result_count=%s results=%s",
+                provider.name,
+                len(results),
+                _search_result_log_records(results),
+            )
+            return results, None
+        except Exception as exc:  # noqa: BLE001 - external provider failures must not abort graph runs
+            provider_error = ProviderSearchError(
+                provider=provider.name,
+                error_type=type(exc).__name__,
+                message=str(exc),
+            )
+            logger.warning(
+                "Search provider failed: provider=%s error_type=%s error=%s",
+                provider_error.provider,
+                provider_error.error_type,
+                provider_error.message,
+                exc_info=True,
+            )
+            return [], provider_error
 
     @staticmethod
     def _validate_focused_domains(
@@ -338,6 +407,27 @@ def count_domains(results: Iterable[NormalizedSearchResult]) -> dict[str, int]:
     return dict(Counter(result.canonical_domain for result in results if result.canonical_domain))
 
 
+def _search_result_log_records(results: Iterable[NormalizedSearchResult]) -> list[dict[str, object]]:
+    """Return compact result metadata suitable for logs.
+
+    Avoid logging raw page content while still surfacing enough detail to debug
+    provider behavior, filtering, and empty/low-quality result sets.
+    """
+
+    return [
+        {
+            "url": result.url,
+            "normalized_url": result.normalized_url,
+            "canonical_domain": result.canonical_domain,
+            "title": result.title,
+            "published_date": result.published_date,
+            "summary_characters": len(result.summary or ""),
+            "raw_content_characters": len(result.raw_content or ""),
+        }
+        for result in results
+    ]
+
+
 def underrepresented_domains(
     policy: SearchPolicy,
     results: Iterable[NormalizedSearchResult],
@@ -398,6 +488,32 @@ def dedupe_results(
         seen[key] = result
         unique_results.append(result)
     return unique_results, duplicates
+
+
+def enforce_domain_policy(
+    results: Iterable[NormalizedSearchResult],
+    *,
+    policy: SearchPolicy,
+    focused_domains: tuple[str, ...] = (),
+) -> tuple[list[NormalizedSearchResult], list[RejectedSearchResult]]:
+    """Reject provider-returned results that violate domain constraints.
+
+    Provider domain filters are an optimization; this function is the gateway's
+    authoritative acceptance boundary for result domains.
+    """
+
+    allowed_domains = set(focused_domains or policy.allowed_domains)
+    if not allowed_domains:
+        return list(results), []
+
+    accepted = []
+    rejected = []
+    for result in results:
+        if result.canonical_domain in allowed_domains:
+            accepted.append(result)
+        else:
+            rejected.append(RejectedSearchResult(result=result, reason="domain_not_allowed"))
+    return accepted, rejected
 
 
 def _get_field(value: Any, name: str, default: Any = None) -> Any:

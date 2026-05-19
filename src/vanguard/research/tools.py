@@ -93,6 +93,14 @@ async def _run_search_gateway_tool(
         "evidence_artifacts": evidence_artifacts,
         "provider_counts": result.provider_counts,
         "domain_counts": result.domain_counts,
+        "provider_errors": [
+            {
+                "provider": error.provider,
+                "error_type": error.error_type,
+                "message": error.message,
+            }
+            for error in result.provider_errors
+        ],
         "duplicates_removed": len(result.duplicates),
     }
     logger.info(
@@ -103,6 +111,7 @@ async def _run_search_gateway_tool(
             "duplicates_removed": len(result.duplicates),
             "provider_counts": result.provider_counts,
             "domain_counts": result.domain_counts,
+            "provider_errors": [error.provider for error in result.provider_errors],
         },
     )
     return response

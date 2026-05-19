@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import logging
 
 import pytest
 
@@ -191,6 +192,45 @@ class FakeProvider:
         return self.results
 
 
+class FailingProvider:
+    def __init__(self, name="failing", error: Exception | None = None):
+        self.name = name
+        self.error = error or RuntimeError("provider unavailable")
+
+    async def search(self, query, policy, focused_domains=(), highlight_query=None):
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_gateway_logs_provider_result_metadata(caplog):
+    gateway = SearchGateway(
+        [
+            FakeProvider(
+                [
+                    NormalizedSearchResult(
+                        provider="exa",
+                        query="q",
+                        url="https://example.com/a",
+                        title="A",
+                        summary="Short summary",
+                        raw_content="Full source text",
+                        published_date="2026-05-19",
+                    )
+                ]
+            )
+        ]
+    )
+
+    with caplog.at_level(logging.INFO, logger="vanguard.search_gateway"):
+        await gateway.search("q", SearchPolicy())
+
+    assert "Search provider completed: provider=fake result_count=1" in caplog.text
+    assert "https://example.com/a" in caplog.text
+    assert "canonical_domain" in caplog.text
+    assert "raw_content_characters" in caplog.text
+    assert "Full source text" not in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_gateway_validates_focused_domains_and_dedupes_results():
     results = [
@@ -213,11 +253,82 @@ async def test_gateway_validates_focused_domains_and_dedupes_results():
     assert provider.calls[0][3] == "evidence focus"
     assert [result.normalized_url for result in response.results] == [
         "https://example.com/a",
-        "https://other.com/b",
     ]
     assert len(response.duplicates) == 1
-    assert response.provider_counts == {"exa": 2}
-    assert response.domain_counts == {"example.com": 1, "other.com": 1}
+    assert len(response.rejected_results) == 1
+    assert response.rejected_results[0].result.canonical_domain == "other.com"
+    assert response.rejected_results[0].reason == "domain_not_allowed"
+    assert response.provider_counts == {"exa": 1}
+    assert response.domain_counts == {"example.com": 1}
+
+
+@pytest.mark.asyncio
+async def test_gateway_enforces_allowed_domains_after_provider_return():
+    results = [
+        NormalizedSearchResult(provider="exa", query="q", url="https://example.com/a"),
+        NormalizedSearchResult(provider="tavily", query="q", url="https://offpolicy.com/b"),
+    ]
+    gateway = SearchGateway([FakeProvider(results)])
+
+    response = await gateway.search("q", SearchPolicy(allowed_domains=("example.com",)))
+
+    assert [result.canonical_domain for result in response.results] == ["example.com"]
+    assert [item.result.canonical_domain for item in response.rejected_results] == ["offpolicy.com"]
+    assert response.provider_counts == {"exa": 1}
+    assert response.domain_counts == {"example.com": 1}
+
+
+@pytest.mark.asyncio
+async def test_gateway_accepts_all_domains_without_policy_constraints():
+    results = [
+        NormalizedSearchResult(provider="exa", query="q", url="https://example.com/a"),
+        NormalizedSearchResult(provider="tavily", query="q", url="https://other.com/b"),
+    ]
+    gateway = SearchGateway([FakeProvider(results)])
+
+    response = await gateway.search("q", SearchPolicy())
+
+    assert [result.canonical_domain for result in response.results] == ["example.com", "other.com"]
+    assert response.rejected_results == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_records_provider_errors_without_failing_successful_provider(caplog):
+    gateway = SearchGateway(
+        [
+            FakeProvider([NormalizedSearchResult(provider="exa", query="q", url="https://example.com/a")]),
+            FailingProvider(name="tavily", error=PermissionError("quota exceeded")),
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING, logger="vanguard.search_gateway"):
+        response = await gateway.search("q", SearchPolicy())
+
+    assert [result.url for result in response.results] == ["https://example.com/a"]
+    assert response.provider_counts == {"exa": 1}
+    assert len(response.provider_errors) == 1
+    assert response.provider_errors[0].provider == "tavily"
+    assert response.provider_errors[0].error_type == "PermissionError"
+    assert response.provider_errors[0].message == "quota exceeded"
+    assert "Search provider failed: provider=tavily error_type=PermissionError error=quota exceeded" in caplog.text
+    assert "Traceback" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_gateway_returns_empty_result_with_errors_when_all_providers_fail():
+    gateway = SearchGateway(
+        [
+            FailingProvider(name="exa", error=RuntimeError("exa down")),
+            FailingProvider(name="tavily", error=PermissionError("quota exceeded")),
+        ]
+    )
+
+    response = await gateway.search("q", SearchPolicy())
+
+    assert response.results == []
+    assert response.provider_counts == {}
+    assert response.domain_counts == {}
+    assert [error.provider for error in response.provider_errors] == ["exa", "tavily"]
 
 
 @pytest.mark.asyncio
