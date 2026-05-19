@@ -19,18 +19,16 @@ class ResearchRequest(BaseModel):
     allowed_domains: list[str] | None = None
     start_date: date | None = None
     end_date: date | None = None
+    verbose: bool = False
 
 
 class ResearchResponse(BaseModel):
     final_report: str | None = None
+    status: str
     research_brief: str | None = None
-    research_tasks: list[dict[str, object]] = Field(default_factory=list)
-    research_findings: list[dict[str, object]] = Field(default_factory=list)
-    research_sources: list[dict[str, object | None]] = Field(default_factory=list)
-    evidence_artifacts: list[dict[str, object | None]] = Field(default_factory=list)
-    research_reviews: list[dict[str, object]] = Field(default_factory=list)
-    search_provider_counts: dict[str, int] = Field(default_factory=dict)
-    search_domain_counts: dict[str, int] = Field(default_factory=dict)
+    source_count: int = 0
+    review_rounds: int = 0
+    debug: dict[str, object] | None = None
 
 
 @lru_cache(maxsize=1)
@@ -45,12 +43,12 @@ def get_runtime_config() -> LangGraphConfig:
 app = FastAPI(title="Vanguard Research API")
 
 
-@app.post("/research", response_model=ResearchResponse)
+@app.post("/research", response_model=ResearchResponse, response_model_exclude_none=True)
 async def run_research(
     request: ResearchRequest,
     graph=Depends(get_compiled_graph),
     runtime_config: LangGraphConfig = Depends(get_runtime_config),
-) -> dict[str, object]:
+) -> ResearchResponse:
     graph_input: dict[str, object] = {"research_intent": request.human_message}
     if request.allowed_domains is not None:
         graph_input["allowed_domains"] = request.allowed_domains
@@ -59,4 +57,28 @@ async def run_research(
     if request.end_date is not None:
         graph_input["end_date"] = request.end_date
 
-    return await graph.ainvoke(graph_input, context=runtime_config)
+    result = await graph.ainvoke(graph_input, context=runtime_config)
+    return ResearchResponse(
+        final_report=result.get("final_report") if isinstance(result.get("final_report"), str) else None,
+        status=_research_status(result),
+        research_brief=result.get("research_brief") if isinstance(result.get("research_brief"), str) else None,
+        source_count=_count_dicts(result.get("research_sources")),
+        review_rounds=_count_dicts(result.get("research_reviews")),
+        debug=result if request.verbose else None,
+    )
+
+
+def _research_status(result: dict[str, object]) -> str:
+    reviews = result.get("research_reviews")
+    if not isinstance(reviews, list) or not reviews:
+        return "unreviewed"
+    latest_review = reviews[-1]
+    if not isinstance(latest_review, dict):
+        return "unreviewed"
+    return "sufficient" if latest_review.get("sufficient") is True else "insufficient"
+
+
+def _count_dicts(value: object) -> int:
+    if not isinstance(value, list):
+        return 0
+    return len([item for item in value if isinstance(item, dict)])

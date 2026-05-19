@@ -46,7 +46,13 @@ def test_research_endpoint_maps_request_to_graph_input():
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json()["final_report"] == "Final answer"
+    assert response.json() == {
+        "final_report": "Final answer",
+        "status": "sufficient",
+        "research_brief": "Research brief",
+        "source_count": 1,
+        "review_rounds": 1,
+    }
     assert fake_graph.calls == [
         (
             {
@@ -72,3 +78,24 @@ def test_research_endpoint_accepts_request_without_optional_constraints():
 
     assert response.status_code == 200
     assert fake_graph.calls[0][0] == {"research_intent": "Summarize current AI search APIs"}
+    assert "debug" not in response.json()
+
+
+def test_research_endpoint_verbose_response_includes_debug_state():
+    fake_graph = FakeGraph()
+    app.dependency_overrides[get_compiled_graph] = lambda: fake_graph
+    app.dependency_overrides[get_runtime_config] = lambda: object()
+
+    try:
+        response = TestClient(app).post(
+            "/research",
+            json={"human_message": "Summarize current AI search APIs", "verbose": True},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "sufficient"
+    assert body["debug"]["research_tasks"] == [{"task_id": "task-1", "description": "Task"}]
+    assert body["debug"]["research_sources"] == [{"source_id": "S1", "url": "https://example.com"}]
