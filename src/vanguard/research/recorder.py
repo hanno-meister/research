@@ -14,7 +14,38 @@ EvidenceArtifactRecord = dict[str, str | int | None]
 
 @dataclass
 class ResearchRunRecorder:
-    """Collect deterministic search metadata across one research agent run."""
+    """Record deterministic source and evidence metadata for one research run.
+
+    The recorder is an in-memory, run-local ledger owned by Python rather than
+    the research LLM. It assigns stable source IDs, deduplicates sources by
+    normalized URL, links sources to evidence artifacts, tracks search attempts,
+    and exposes provider/domain counts for debugging and review. Raw evidence
+    content is not stored here; only metadata and virtual evidence paths are
+    recorded.
+
+    Attributes:
+        sources_by_url: Source records keyed by normalized URL. Used as the
+            canonical in-memory source ledger for the current run.
+        source_ids_by_url: Stable source IDs keyed by normalized URL, such as
+            ``{"https://example.com/article": "S1"}``.
+        evidence_artifacts_by_url: Evidence artifact metadata keyed by
+            normalized URL. Links a source to its virtual ``/evidence/...`` path.
+        initial_urls: URLs that were already present when constructing the
+            recorder from existing graph state. Used to return only newly found
+            sources during follow-up research.
+        initial_evidence_paths: Evidence paths that were already present when
+            constructing the recorder from existing graph state. Used to return
+            only newly written evidence artifacts during follow-up research.
+        search_attempts: Number of search result batches recorded. Used by
+            research nodes to verify that workers actually called the search
+            gateway.
+
+    Output:
+        The recorder exports graph-state-ready records through methods such as
+        ``sources()``, ``evidence_artifacts()``, ``provider_counts()``, and
+        ``domain_counts()``. These outputs are merged into ``AgentState`` after
+        research workers complete.
+    """
 
     sources_by_url: dict[str, SourceRecord] = field(default_factory=dict)
     source_ids_by_url: dict[str, str] = field(default_factory=dict)
@@ -200,50 +231,7 @@ def assess_source(source: SourceRecord) -> tuple[str, str, list[str]]:
     if _looks_like_scrape_artifact(title):
         warnings.append("possible_scrape_artifact")
 
-    if _is_primary_domain(domain):
-        return "primary", "high", warnings
-    if _is_major_secondary_domain(domain):
-        warnings.append("secondary_source")
-        return "secondary", "high", warnings
-    if _is_commentary_domain(domain):
-        warnings.append("newsletter_or_commentary")
-        return "commentary", "medium", warnings
-    return "unknown", "unknown", warnings
-
-
-def _is_primary_domain(domain: str) -> bool:
-    if not domain:
-        return False
-    primary_domains = (
-        "investor.nvidia.com",
-        "nvidianews.nvidia.com",
-        "sec.gov",
-        "commerce.gov",
-        "bis.doc.gov",
-    )
-    if domain in primary_domains:
-        return True
-    return domain.endswith(".nvidia.com") or domain in {"nvidia.com", "blogs.nvidia.com"}
-
-
-def _is_major_secondary_domain(domain: str) -> bool:
-    return domain in {
-        "reuters.com",
-        "apnews.com",
-        "cnbc.com",
-        "marketwatch.com",
-        "barrons.com",
-        "technologyreview.com",
-        "venturebeat.com",
-    }
-
-
-def _is_commentary_domain(domain: str) -> bool:
-    return domain in {
-        "theneurondaily.com",
-        "deeplearning.ai",
-        "tldr.tech",
-    }
+    return "source", "high", warnings
 
 
 def _is_generic_index_page(path: str, url: str) -> bool:
