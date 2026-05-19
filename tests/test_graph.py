@@ -9,13 +9,15 @@ from typing import cast
 from vanguard import research
 from vanguard import planning
 from vanguard import review
+from vanguard.prompts import RESEARCH_PLAN_PROMPT
 from vanguard.report import final_report_generation
 from vanguard.review import evidence as review_evidence
 from vanguard.review import followup as review_followup
 from vanguard.review import node as review_node
+from vanguard.review.prompts import review_prompt
 from vanguard.research import policy
 from vanguard.research import node, tools
-from vanguard.research.agent import filesystem_backend
+from vanguard.research.agent import RESEARCH_AGENT_SYSTEM_PROMPT, filesystem_backend
 from vanguard.search_gateway import NormalizedSearchResult, SearchGatewayResult, SearchPolicy
 from vanguard.state import AgentState
 
@@ -206,6 +208,9 @@ async def test_conduct_research_invokes_agent_and_returns_compact_state(monkeypa
             "published_date": "2026-05-01",
             "normalized_url": "https://example.com/research",
             "canonical_domain": "example.com",
+            "source_type": "unknown",
+            "source_quality": "unknown",
+            "source_warnings": [],
             "source_id": "S1",
         }
     ]
@@ -431,6 +436,44 @@ def test_sanitized_tasks_falls_back_to_safe_task_when_empty():
     assert sanitized[0].id == "task-1"
     assert sanitized[0].objective == "Preserve this brief"
     assert sanitized[0].focused_domains == ["example.com"]
+
+
+def test_sanitized_tasks_collapses_broad_simple_intent_to_single_task():
+    tasks = [
+        planning.ResearchTask(
+            id=f"task-{index}",
+            objective=f"Narrow task {index}",
+            rationale="Needed",
+            expected_output="Output",
+            effort="medium",
+        )
+        for index in range(1, 4)
+    ]
+
+    sanitized = planning._sanitized_tasks(
+        tasks,
+        cast(AgentState, {"research_intent": "News about NVIDIA"}),
+        "Find recent news about NVIDIA, including confirmed developments and limitations.",
+    )
+
+    assert len(sanitized) == 1
+    assert sanitized[0].objective.startswith("Find recent news about NVIDIA")
+
+
+def test_feasibility_notes_warn_when_source_policy_cannot_cover_requested_evidence():
+    notes = planning.feasibility_notes_for_state(
+        cast(
+            AgentState,
+            {
+                "research_intent": "News about NVIDIA",
+                "allowed_domains": ["blogs.nvidia.com", "technologyreview.com"],
+            },
+        ),
+        "Include earnings, investor reaction, legal and regulatory issues.",
+    )
+
+    assert any("Financial or market-reaction coverage may be incomplete" in note for note in notes)
+    assert any("Legal or regulatory coverage may be incomplete" in note for note in notes)
 
 
 @pytest.mark.asyncio
@@ -726,7 +769,37 @@ async def test_review_research_runs_bounded_follow_up_workers(monkeypatch, tmp_p
     assert len(update["research_reviews"]) == 2
 
 
-def test_final_report_uses_review_caveats_and_promotes_follow_up_findings():
+def test_follow_up_worker_tasks_skips_unavailable_focused_domains():
+    tasks = [
+        planning.ResearchTask(
+            id="blocked",
+            objective="Needs unavailable source",
+            rationale="Blocked",
+            focused_domains=["sec.gov"],
+            expected_output="Output",
+            effort="high",
+        ),
+        planning.ResearchTask(
+            id="allowed",
+            objective="Use allowed source",
+            rationale="Allowed",
+            focused_domains=["example.com"],
+            expected_output="Output",
+            effort="low",
+        ),
+    ]
+
+    worker_tasks = review_followup.follow_up_worker_tasks(
+        tasks,
+        cast(AgentState, {"allowed_domains": ["example.com"], "research_brief": "brief"}),
+        remaining_workers=2,
+        remaining_workers_by_search_budget=2,
+    )
+
+    assert [task.id for task in worker_tasks] == ["allowed"]
+
+
+def test_final_report_filters_caveats_and_promotes_follow_up_findings():
     update = final_report_generation(
         {
             "research_intent": "intent",
@@ -779,16 +852,17 @@ def test_final_report_uses_review_caveats_and_promotes_follow_up_findings():
     )
 
     report = update["final_report"]
+    assert report.startswith("# Intent")
     assert "## Executive Summary" in report
-    assert "## Key Findings" in report
+    assert "## Key Takeaways" in report
     assert "Reducers support parallel state merging." in report
-    assert "## Corrected / Follow-up Findings" in report
     assert "Plan-and-execute should be framed as archival" in report
-    assert "## Caveated Findings" in report
-    assert "Plan-and-execute is an official current LangGraph pattern." in report
-    assert "## Limitations / Evidence Quality" in report
-    assert "S24 is mismatched" in report
-    assert "Raw evidence inspected for S24" in report
+    assert "Plan-and-execute is an official current LangGraph pattern." not in report
+    assert "## Evidence and Limitations" in report
+    assert "Lower-confidence, contradictory, or insufficiently supported items were omitted" in report
+    assert "S24 is mismatched" not in report
+    assert "Raw evidence inspected for S24" not in report
+    assert "/evidence/" not in report
 
 
 def test_final_report_gracefully_handles_missing_review():
@@ -800,19 +874,80 @@ def test_final_report_gracefully_handles_missing_review():
                     "task_id": "task-1",
                     "summary": "Compact finding.",
                     "source_ids": ["S1"],
-                    "evidence_paths": ["/evidence/source.md"],
+                    "evidence_paths": ["/evidence/other.md"],
                 }
             ],
         }
     )
 
     report = update["final_report"]
-    assert "No evaluator review was available" in report
+    assert "# Research Incomplete" in report
+    assert "No evidence-quality check was available" in report
     assert "Compact finding." in report
-    assert "sources: S1" in report
+    assert "sources: S1" not in report
 
 
-def test_final_report_aggregates_review_caveats_without_source_id_substring_matches():
+def test_incomplete_report_is_concise_public_and_omits_evidence_paths():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_tasks": [{"id": "task-1", "objective": "Initial"}],
+            "research_findings": [
+                {
+                    "task_id": "task-1",
+                    "summary": "Supported provisional finding.",
+                    "source_ids": ["S3"],
+                    "evidence_paths": ["/evidence/other.md"],
+                },
+                {
+                    "task_id": "task-1",
+                    "summary": "Remove this review-control note from the final report.",
+                    "source_ids": ["S2"],
+                },
+            ],
+            "research_reviews": [
+                {
+                    "sufficient": False,
+                    "coverage_assessment": "Market reaction coverage is incomplete.",
+                    "contradiction_notes": [
+                        "Market reaction coverage is incomplete.",
+                        "S1 should not anchor claims from /evidence/source.md without stronger corroboration.",
+                    ],
+                    "weak_or_unsupported_findings": [],
+                    "follow_up_tasks": [{"id": "task-2", "objective": "Check primary filings."}],
+                }
+            ],
+            "research_sources": [{"source_id": "S1", "title": "Source", "canonical_domain": "example.com"}],
+            "evidence_artifacts": [{"source_id": "S1", "path": "/evidence/source.md"}],
+        }
+    )
+
+    report = update["final_report"]
+    assert report.startswith("# Research Incomplete")
+    assert report.count("Market reaction coverage is incomplete.") == 1
+    assert "Supported provisional finding." in report
+    assert "Remove this review-control note" not in report
+    assert "does not sufficiently support claims from evidence artifact" in report
+    assert "Check primary filings." in report
+    assert "S1" not in report
+    assert "/evidence/" not in report
+
+
+def test_prompts_include_general_source_quality_invariants():
+    assert "primary, official, regulatory, academic" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Do not convert review/control notes into findings" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "source-quality expectations" in RESEARCH_PLAN_PROMPT
+
+    prompt = review_prompt(
+        {"research_intent": "intent", "research_brief": "brief", "research_sources": [], "research_findings": []},
+        round_number=1,
+        evidence_snippets=[],
+    )
+    assert "Do not mark research sufficient just because sources exist" in prompt
+    assert "Weakness notes are control data" in prompt
+
+
+def test_final_report_filters_review_caveats_without_source_id_substring_matches():
     update = final_report_generation(
         {
             "research_intent": "intent",
@@ -860,15 +995,13 @@ def test_final_report_aggregates_review_caveats_without_source_id_substring_matc
     )
 
     report = update["final_report"]
-    key_findings = report.split("## Corrected / Follow-up Findings")[0]
-    corrected_findings = report.split("## Corrected / Follow-up Findings")[1].split("## Caveated Findings")[0]
-    assert "Stable S1-backed finding." in key_findings
-    assert "Weak S10-backed finding." not in key_findings
-    assert "## Caveated Findings" in report
-    assert "Weak S10-backed finding." in report
-    assert "S10 is weak and should be caveated." in report
-    assert "Follow-up finding from review-requested task." in corrected_findings
-    assert "Earlier evidence-quality concern." in report
+    assert "Stable S1-backed finding." in report
+    assert "Weak S10-backed finding." not in report
+    assert "Weak S10-backed finding." not in report
+    assert "S10 is weak and should be caveated." not in report
+    assert "Follow-up finding from review-requested task." in report
+    assert "Earlier evidence-quality concern." not in report
+    assert "Source quality is adequate" in report
 
 
 def test_final_report_caveat_takes_precedence_over_follow_up_section():
@@ -896,9 +1029,9 @@ def test_final_report_caveat_takes_precedence_over_follow_up_section():
     )
 
     report = update["final_report"]
-    assert "## Caveated Findings" in report
-    assert "Follow-up finding that still needs caveat." in report.split("## Caveated Findings")[1]
-    assert "## Corrected / Follow-up Findings" not in report
+    assert "## Corrections and Updates" not in report
+    assert "Follow-up finding that still needs caveat." not in report
+    assert "Lower-confidence, contradictory, or insufficiently supported items were omitted" in report
 
 
 def test_final_report_ignores_colliding_follow_up_diversity_note_task_ids():
@@ -931,10 +1064,147 @@ def test_final_report_ignores_colliding_follow_up_diversity_note_task_ids():
     )
 
     report = update["final_report"]
-    key_findings = report.split("## Corrected / Follow-up Findings")[0]
-    corrected_findings = report.split("## Corrected / Follow-up Findings")[1].split(
-        "## Limitations / Evidence Quality"
-    )[0]
-    assert "Original task finding should stay key finding." in key_findings
-    assert "Original task finding should stay key finding." not in corrected_findings
-    assert "Review-record follow-up should still be promoted." in corrected_findings
+    assert "## Corrections and Updates" not in report
+    assert "Original task finding should stay key finding." in report
+    assert "Review-record follow-up should still be promoted." in report
+
+
+def test_final_report_filters_instruction_findings_and_prioritizes_strong_sources():
+    update = final_report_generation(
+        {
+            "research_intent": "Find recent Nvidia news",
+            "research_tasks": [{"id": "task-1", "objective": "Recent Nvidia news"}],
+            "research_findings": [
+                {
+                    "task_id": "task-1",
+                    "summary": "Recent newsletter coverage says NVIDIA is using AI to design chips.",
+                    "source_ids": ["S1"],
+                    "evidence_paths": ["/evidence/newsletter.md"],
+                },
+                {
+                    "task_id": "task-1",
+                    "summary": "Flag CES 2026 and roundup pages as out of scope for this task because they are not individually verified.",
+                    "source_ids": ["S2"],
+                    "evidence_paths": ["/evidence/feed.md"],
+                },
+                {
+                    "task_id": "task-1",
+                    "summary": "Reuters reported NVIDIA would invest up to $2.1B in IREN as part of an AI data-center deal.",
+                    "source_ids": ["S3"],
+                    "evidence_paths": ["/evidence/reuters.md"],
+                },
+            ],
+            "research_sources": [
+                {
+                    "source_id": "S1",
+                    "title": "AI-guided chip design newsletter",
+                    "url": "https://www.deeplearning.ai/the-batch/issue-352",
+                    "canonical_domain": "deeplearning.ai",
+                    "published_date": "2026-05-08",
+                },
+                {
+                    "source_id": "S2",
+                    "title": "NVIDIA roundup feed",
+                    "url": "https://blogs.nvidia.com/feed/",
+                    "canonical_domain": "blogs.nvidia.com",
+                    "published_date": None,
+                },
+                {
+                    "source_id": "S3",
+                    "title": "Nvidia to invest in IREN data center deal",
+                    "url": "https://www.reuters.com/business/nvidia-invest-iren-2026-05-07/",
+                    "canonical_domain": "reuters.com",
+                    "published_date": "2026-05-07",
+                },
+            ],
+            "research_reviews": [{"sufficient": True}],
+            "search_provider_counts": {"exa": 1, "tavily": 2},
+        }
+    )
+
+    report = update["final_report"]
+    assert report.startswith("# Recent Nvidia news")
+    assert "Flag CES 2026" not in report
+    assert "/evidence/" not in report
+    assert "## Major Developments\n\n" not in report
+    assert report.index("Reuters reported") < report.index("Recent newsletter coverage")
+    assert "Nvidia to invest in IREN data center deal" in report
+
+
+def test_final_report_deduplicates_overlapping_findings_and_uses_public_citations():
+    update = final_report_generation(
+        {
+            "research_intent": "Research product launch",
+            "research_findings": [
+                {
+                    "task_id": "task-1",
+                    "summary": "The company launched a new platform for enterprise customers.",
+                    "source_ids": ["S1"],
+                    "evidence_paths": ["/evidence/source.md"],
+                },
+                {
+                    "task_id": "task-2",
+                    "summary": "The company launched a new enterprise platform for customers and partners.",
+                    "source_ids": ["S1"],
+                    "evidence_paths": ["/evidence/source.md"],
+                },
+            ],
+            "research_sources": [
+                {
+                    "source_id": "S1",
+                    "title": "Official launch post",
+                    "url": "https://example.com/launch",
+                    "canonical_domain": "example.com",
+                    "published_date": "2026-05-01",
+                }
+            ],
+            "research_reviews": [{"sufficient": True}],
+        }
+    )
+
+    report = update["final_report"]
+    assert "The company launched a new platform for enterprise customers." in report
+    assert "The company launched a new enterprise platform" not in report
+    assert "Official launch post" in report
+    assert "S1" not in report
+    assert "/evidence/" not in report
+
+
+def test_recorder_adds_lightweight_source_assessment_metadata():
+    recorder = research.ResearchRunRecorder()
+
+    recorded = recorder.record_search_results(
+        [
+            {
+                "provider": "tavily",
+                "query": "q",
+                "url": "https://blogs.nvidia.com/",
+                "title": "NVIDIA Blog",
+                "summary": "Index page summary",
+                "raw_content_path": None,
+                "published_date": None,
+                "normalized_url": "https://blogs.nvidia.com/",
+                "canonical_domain": "blogs.nvidia.com",
+            },
+            {
+                "provider": "exa",
+                "query": "q",
+                "url": "https://www.reuters.com/business/nvidia-example/",
+                "title": "Reuters Nvidia report",
+                "summary": "News summary",
+                "raw_content_path": None,
+                "published_date": "2026-05-07",
+                "normalized_url": "https://reuters.com/business/nvidia-example",
+                "canonical_domain": "reuters.com",
+            },
+        ],
+        [],
+    )
+
+    index_source, news_source = recorded
+    assert index_source["source_type"] == "index_or_feed"
+    assert index_source["source_quality"] == "low"
+    assert index_source["source_warnings"] == ["undated", "generic_index_page"]
+    assert news_source["source_type"] == "secondary"
+    assert news_source["source_quality"] == "high"
+    assert news_source["source_warnings"] == ["secondary_source"]

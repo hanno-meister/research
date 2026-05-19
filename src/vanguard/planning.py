@@ -90,8 +90,12 @@ async def plan_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
         raise TypeError(f"Expected ResearchPlan, got {type(response).__name__}")
 
     tasks = _sanitized_tasks(response.tasks, state, research_brief)
+    feasibility_notes = feasibility_notes_for_state(state, research_brief)
     logger.info("Planned research tasks", extra={"research_task_count": len(tasks)})
-    return {"research_tasks": [task.model_dump() for task in tasks]}
+    update: dict[str, object] = {"research_tasks": [task.model_dump() for task in tasks]}
+    if feasibility_notes:
+        update["research_feasibility_notes"] = feasibility_notes
+    return update
 
 
 def _runtime_constraints_text(state: AgentState) -> str:
@@ -106,12 +110,74 @@ def _runtime_constraints_text(state: AgentState) -> str:
 
 
 def _sanitized_tasks(
-    tasks: list[ResearchTask], state: AgentState, research_brief: str
+    tasks: list[ResearchTask], state: AgentState, research_brief: str, *, collapse: bool = True
 ) -> list[ResearchTask]:
     allowed_domains = _normalized_allowed_domains(state)
     sanitized = [_sanitize_task(task, index, allowed_domains) for index, task in enumerate(tasks, start=1)]
     sanitized = [task for task in sanitized if task.objective.strip()]
-    return sanitized or [_fallback_task(research_brief, allowed_domains)]
+    if not sanitized:
+        return [_fallback_task(research_brief, allowed_domains)]
+    if collapse and len(sanitized) > 1 and _should_collapse_to_single_task(state, research_brief):
+        return [_fallback_task(research_brief, allowed_domains)]
+    return sanitized[:3]
+
+
+def _should_collapse_to_single_task(state: AgentState, research_brief: str) -> bool:
+    intent = str(state.get("research_intent") or "")
+    text = f"{intent}\n{research_brief}".lower()
+    explicit_split_cues = (
+        " compare ",
+        " comparison ",
+        " versus ",
+        " vs ",
+        " pros and cons",
+        " across regions",
+        " by country",
+        " by region",
+    )
+    if any(cue in f" {text} " for cue in explicit_split_cues):
+        return False
+    return len(intent.split()) <= 6 or any(term in text for term in ["recent news", "latest news", "overview", "summarize"])
+
+
+def feasibility_notes_for_state(state: AgentState, research_brief: str) -> list[str]:
+    allowed_domains = set(_normalized_allowed_domains(state))
+    if not allowed_domains:
+        return []
+
+    text = f"{state.get('research_intent') or ''}\n{research_brief}".lower()
+    notes = []
+    financial_terms = ("earnings", "revenue", "guidance", "margin", "eps", "stock", "investor", "financial")
+    legal_terms = ("legal", "regulatory", "regulator", "lawsuit", "court", "export control", "antitrust", "filing")
+    market_terms = ("market-moving", "market reaction", "analyst", "price", "valuation")
+
+    if any(term in text for term in financial_terms + market_terms) and not _has_allowed_domain(
+        allowed_domains,
+        ("sec.gov", "investor.", "reuters.com", "apnews.com", "wsj.com", "ft.com", "bloomberg.com"),
+    ):
+        notes.append(
+            "Financial or market-reaction coverage may be incomplete because the allowed domains do not include primary investor filings or established financial-news sources."
+        )
+    if any(term in text for term in legal_terms) and not _has_allowed_domain(
+        allowed_domains,
+        ("sec.gov", "justice.gov", "commerce.gov", "bis.doc.gov", "reuters.com", "apnews.com", "wsj.com", "ft.com", "bloomberg.com"),
+    ):
+        notes.append(
+            "Legal or regulatory coverage may be incomplete because the allowed domains do not include primary regulator, court, filing, or established legal-news sources."
+        )
+    return notes
+
+
+def _has_allowed_domain(allowed_domains: set[str], candidates: tuple[str, ...]) -> bool:
+    for domain in allowed_domains:
+        if any(
+            domain == candidate
+            or domain.endswith("." + candidate)
+            or (candidate.endswith(".") and candidate in domain)
+            for candidate in candidates
+        ):
+            return True
+    return False
 
 
 def _sanitize_task(
