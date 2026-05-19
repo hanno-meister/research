@@ -4,11 +4,11 @@ import logging
 from typing import Any
 
 from langchain.tools import ToolRuntime, tool
+from vanguard.utils.urls import normalize_search_query
 
 from .defaults import default_search_gateway
 from .evidence import write_evidence_file
 from .models import ResearchAgentContext
-from .policy import _bounded_query
 
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,17 @@ async def _run_search_gateway_tool(
             "duplicates_removed": 0,
         }
 
-    resolved_query = _resolve_query(query, context.default_query)
-    resolved_highlight_query = highlight_query or context.default_highlight_query
+    resolved_query = normalize_search_query(query or "")
+    if not resolved_query:
+        return {
+            "error": "search_gateway requires a non-empty query.",
+            "results": [],
+            "evidence_artifacts": [],
+            "provider_counts": {},
+            "domain_counts": {},
+            "duplicates_removed": 0,
+        }
+    resolved_highlight_query = normalize_search_query(highlight_query or resolved_query)
     logger.info(
         "Running search gateway tool",
         extra={
@@ -129,10 +138,3 @@ def _serialize_search_result(item, evidence_artifact=None) -> dict[str, str | No
         "normalized_url": item.normalized_url,
         "canonical_domain": item.canonical_domain,
     }
-
-
-def _resolve_query(query: str | None, default_query: str) -> str:
-    bounded_query = _bounded_query(query or "")
-    if bounded_query:
-        return bounded_query
-    return _bounded_query(default_query)

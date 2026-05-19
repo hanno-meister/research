@@ -1,6 +1,9 @@
 """Default providers for the research agent search tool."""
 
-from vanguard.search_gateway import ExaSearchAdapter, SearchGateway, TavilySearchAdapter
+from vanguard.research.search_gateway import ExaSearchAdapter, SearchGateway, TavilySearchAdapter
+
+
+MAX_SEARCH_CALLS_PER_WORKER = 2
 
 
 def default_search_gateway() -> SearchGateway:

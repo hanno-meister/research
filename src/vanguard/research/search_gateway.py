@@ -12,124 +12,25 @@ import asyncio
 import importlib
 import logging
 from collections import Counter
-from dataclasses import dataclass, field
-from datetime import date
-from typing import Any, Iterable, Protocol
+from typing import Any, Iterable
 
 from pydantic import SecretStr
 
 from config import config
-from vanguard.utils.collections import unique_preserving_order
-from vanguard.utils.urls import canonical_domain_from_url, normalize_domain, normalize_url
+from vanguard.research.search_gateway_models import (
+    DuplicateSearchResult,
+    NormalizedSearchResult,
+    ProviderSearchError,
+    RejectedSearchResult,
+    SearchGatewayError,
+    SearchGatewayResult,
+    SearchPolicy,
+    SearchProvider,
+)
+from vanguard.utils.urls import normalize_domains
 
 
 logger = logging.getLogger(__name__)
-
-
-class SearchGatewayError(ValueError):
-    """Raised when a search request violates gateway-level policy."""
-
-
-@dataclass(frozen=True)
-class SearchPolicy:
-    """User-provided search constraints.
-
-    Empty/None fields mean unconstrained for that dimension:
-    - allowed_domains=() -> no domain constraint
-    - start_date=None -> no lower publication-date bound
-    - end_date=None -> no upper publication-date bound
-    """
-
-    allowed_domains: tuple[str, ...] = ()
-    start_date: date | None = None
-    end_date: date | None = None
-
-    def __post_init__(self) -> None:
-        normalized_domains = tuple(
-            normalize_domain(domain) for domain in self.allowed_domains if domain.strip()
-        )
-        object.__setattr__(self, "allowed_domains", tuple(unique_preserving_order(normalized_domains)))
-
-        if self.start_date and self.end_date and self.start_date > self.end_date:
-            raise SearchGatewayError("start_date must be before or equal to end_date")
-
-
-@dataclass(frozen=True)
-class NormalizedSearchResult:
-    """Compact common result shape returned by all provider adapters.
-
-    `summary` is intentionally not raw page content. It is the best compact
-    provider-supplied evidence text for the source, such as Exa highlights /
-    summary or Tavily content.
-    """
-
-    provider: str
-    query: str
-    url: str
-    title: str | None = None
-    summary: str | None = None
-    raw_content: str | None = None
-    published_date: str | None = None
-    normalized_url: str = field(init=False)
-    canonical_domain: str = field(init=False)
-
-    def __post_init__(self) -> None:
-        normalized_url = normalize_url(self.url)
-        object.__setattr__(self, "normalized_url", normalized_url)
-        object.__setattr__(self, "canonical_domain", canonical_domain_from_url(normalized_url))
-
-
-@dataclass(frozen=True)
-class DuplicateSearchResult:
-    """A result removed during gateway deduplication."""
-
-    result: NormalizedSearchResult
-    duplicate_of_url: str
-
-
-@dataclass(frozen=True)
-class RejectedSearchResult:
-    """A result rejected by gateway-side policy enforcement."""
-
-    result: NormalizedSearchResult
-    reason: str
-
-
-@dataclass(frozen=True)
-class ProviderSearchError:
-    """A provider failure captured so one bad provider does not abort a run."""
-
-    provider: str
-    error_type: str
-    message: str
-
-
-@dataclass(frozen=True)
-class SearchGatewayResult:
-    """Gateway response after provider calls, normalization, and dedupe."""
-
-    results: list[NormalizedSearchResult]
-    duplicates: list[DuplicateSearchResult]
-    provider_counts: dict[str, int]
-    domain_counts: dict[str, int]
-    rejected_results: list[RejectedSearchResult] = field(default_factory=list)
-    provider_errors: list[ProviderSearchError] = field(default_factory=list)
-
-
-class SearchProvider(Protocol):
-    """Protocol implemented by concrete provider adapters."""
-
-    name: str
-
-    async def search(
-        self,
-        query: str,
-        policy: SearchPolicy,
-        focused_domains: tuple[str, ...] = (),
-        highlight_query: str | None = None,
-    ) -> list[NormalizedSearchResult]:
-        """Run a provider search and return normalized results."""
-        ...
 
 
 class SearchGateway:
@@ -149,9 +50,10 @@ class SearchGateway:
     ) -> SearchGatewayResult:
         """Search all configured providers using user-provided constraints.
 
-        `focused_domains` is only allowed when `policy.allowed_domains` is set,
-        and every focused domain must be a subset of that allowlist. This lets the graph
-        target underrepresented domains without inventing new constraints.
+        `focused_domains` are optional per-call narrowing domains. When provided,
+        every focused domain must be a subset of the policy allowlist and providers
+        are asked to search only those domains. Accepted results are still filtered
+        against the full policy allowlist as the authoritative boundary.
         """
 
         policy = policy or SearchPolicy()
@@ -171,11 +73,7 @@ class SearchGateway:
         )
         flattened_results = [result for results, _error in provider_results for result in results]
         provider_errors = [error for _results, error in provider_results if error is not None]
-        accepted_results, rejected_results = enforce_domain_policy(
-            flattened_results,
-            policy=policy,
-            focused_domains=normalized_focused_domains,
-        )
+        accepted_results, rejected_results = enforce_domain_policy(flattened_results, policy=policy)
         results, duplicates = dedupe_results(accepted_results)
 
         return SearchGatewayResult(
@@ -227,9 +125,7 @@ class SearchGateway:
         if not focused_domains:
             return ()
 
-        normalized_focused_domains = tuple(
-            unique_preserving_order(normalize_domain(domain) for domain in focused_domains if domain.strip())
-        )
+        normalized_focused_domains = normalize_domains(focused_domains)
         if not normalized_focused_domains:
             return ()
 
@@ -494,7 +390,6 @@ def enforce_domain_policy(
     results: Iterable[NormalizedSearchResult],
     *,
     policy: SearchPolicy,
-    focused_domains: tuple[str, ...] = (),
 ) -> tuple[list[NormalizedSearchResult], list[RejectedSearchResult]]:
     """Reject provider-returned results that violate domain constraints.
 
@@ -502,7 +397,7 @@ def enforce_domain_policy(
     authoritative acceptance boundary for result domains.
     """
 
-    allowed_domains = set(focused_domains or policy.allowed_domains)
+    allowed_domains = set(policy.allowed_domains)
     if not allowed_domains:
         return list(results), []
 

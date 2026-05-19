@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from .collections import unique_preserving_order
 
 
 TRACKING_QUERY_PREFIXES = ("utm_",)
@@ -24,13 +27,25 @@ def normalize_domain(domain: str) -> str:
     return value.rstrip(".")
 
 
+def normalize_domains(domains: Iterable[str]) -> tuple[str, ...]:
+    """Normalize, drop empty values, and deduplicate domains in first-seen order."""
+
+    return tuple(
+        unique_preserving_order(
+            normalize_domain(domain)
+            for domain in domains
+            if domain and domain.strip()
+        )
+    )
+
+
 def canonical_domain_from_url(url: str) -> str:
     """Extract a normalized domain from a URL."""
 
     return normalize_domain(urlsplit(url).netloc)
 
 
-def normalize_url(url: str) -> str:
+def normalize_url_for_deduplication(url: str) -> str:
     """Normalize URLs for deduplication without changing the destination."""
 
     parts = urlsplit(url.strip())
@@ -45,3 +60,12 @@ def normalize_url(url: str) -> str:
     ]
     query = urlencode(sorted(query_items), doseq=True)
     return urlunsplit((scheme, netloc, path, query, ""))
+
+
+def normalize_search_query(query: str) -> str:
+    """Normalize free-form provider search text without treating it as a URL."""
+
+    return " ".join(query.split())
+
+
+normalize_url = normalize_url_for_deduplication

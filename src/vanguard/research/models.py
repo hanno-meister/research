@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from vanguard.search_gateway import SearchPolicy
+from vanguard.research.search_gateway_models import SearchPolicy
 
 from .recorder import ResearchRunRecorder
 
@@ -73,4 +73,11 @@ class ResearchAgentOutput(BaseModel):
     findings: list[ResearchFinding] = Field(
         description="Compact task-scoped findings with source IDs and evidence paths."
     )
-    source_diversity_notes: list[str] = Field(default_factory=list)
+    source_diversity_notes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Brief notes about source coverage, such as domain skew, duplicate-heavy "
+            "results, weak primary-source coverage, or source constraints encountered "
+            "while completing this task."
+        ),
+    )

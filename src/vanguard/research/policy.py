@@ -4,14 +4,12 @@ from datetime import date
 
 from typing import Any
 
-from vanguard.search_gateway import SearchPolicy
+from vanguard.research.search_gateway_models import SearchPolicy
 from vanguard.state import AgentState
+from vanguard.utils.urls import normalize_search_query
 
 from .models import ResearchAgentContext, ResearchSearchBudget
 from .recorder import ResearchRunRecorder
-
-
-MAX_SEARCH_QUERY_CHARACTERS = 400
 
 
 def search_context_from_state(
@@ -39,7 +37,7 @@ def search_context_from_state(
 
 
 def _search_query_from_state(state: AgentState, research_brief: str) -> str:
-    return _bounded_query(state.get("research_intent") or research_brief)
+    return normalize_search_query(state.get("research_intent") or research_brief)
 
 
 def _search_policy_from_state(state: AgentState) -> SearchPolicy:
@@ -54,10 +52,3 @@ def _optional_date(value: date | str | None) -> date | None:
     if value is None or isinstance(value, date):
         return value
     return date.fromisoformat(value)
-
-
-def _bounded_query(query: str) -> str:
-    query = " ".join(query.split())
-    if len(query) <= MAX_SEARCH_QUERY_CHARACTERS:
-        return query
-    return query[:MAX_SEARCH_QUERY_CHARACTERS].rsplit(" ", 1)[0]

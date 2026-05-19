@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-from vanguard.search_gateway import NormalizedSearchResult
+from vanguard.research.search_gateway_models import NormalizedSearchResult
 
 
 VIRTUAL_EVIDENCE_ROOT = "/evidence"

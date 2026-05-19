@@ -5,19 +5,24 @@ import logging
 
 import pytest
 
-from vanguard.search_gateway import (
+from vanguard.research.search_gateway import (
     ExaSearchAdapter,
-    NormalizedSearchResult,
     SearchGateway,
-    SearchGatewayError,
-    SearchPolicy,
     TavilySearchAdapter,
     count_domains,
-    normalize_domain,
-    normalize_url,
     source_diversity_note,
     underrepresented_domains,
     _required_api_key,
+)
+from vanguard.research.search_gateway_models import (
+    NormalizedSearchResult,
+    SearchGatewayError,
+    SearchPolicy,
+)
+from vanguard.utils.urls import (
+    normalize_domain,
+    normalize_search_query,
+    normalize_url_for_deduplication,
 )
 
 
@@ -124,7 +129,7 @@ def test_exa_adapter_can_disable_full_text():
 
 
 @pytest.mark.asyncio
-async def test_tavily_adapter_injects_focused_domains_over_policy_domains():
+async def test_tavily_adapter_uses_full_policy_domains_when_focus_is_provided():
     client = RecordingClient(
         {
             "results": [
@@ -221,7 +226,7 @@ async def test_gateway_logs_provider_result_metadata(caplog):
         ]
     )
 
-    with caplog.at_level(logging.INFO, logger="vanguard.search_gateway"):
+    with caplog.at_level(logging.INFO, logger="vanguard.research.search_gateway"):
         await gateway.search("q", SearchPolicy())
 
     assert "Search provider completed: provider=fake result_count=1" in caplog.text
@@ -232,7 +237,7 @@ async def test_gateway_logs_provider_result_metadata(caplog):
 
 
 @pytest.mark.asyncio
-async def test_gateway_validates_focused_domains_and_dedupes_results():
+async def test_gateway_uses_focused_domains_for_provider_narrowing_but_filters_by_policy_allowlist():
     results = [
         NormalizedSearchResult(provider="exa", query="q", url="https://example.com/a?utm_source=x"),
         NormalizedSearchResult(provider="tavily", query="q", url="https://www.example.com/a"),
@@ -253,13 +258,23 @@ async def test_gateway_validates_focused_domains_and_dedupes_results():
     assert provider.calls[0][3] == "evidence focus"
     assert [result.normalized_url for result in response.results] == [
         "https://example.com/a",
+        "https://other.com/b",
     ]
     assert len(response.duplicates) == 1
-    assert len(response.rejected_results) == 1
-    assert response.rejected_results[0].result.canonical_domain == "other.com"
-    assert response.rejected_results[0].reason == "domain_not_allowed"
-    assert response.provider_counts == {"exa": 1}
-    assert response.domain_counts == {"example.com": 1}
+    assert response.rejected_results == []
+    assert response.provider_counts == {"exa": 2}
+    assert response.domain_counts == {"example.com": 1, "other.com": 1}
+
+
+@pytest.mark.asyncio
+async def test_gateway_uses_policy_allowlist_when_focused_domains_are_empty():
+    provider = FakeProvider([])
+    gateway = SearchGateway([provider])
+    policy = SearchPolicy(allowed_domains=("example.com", "docs.example.com"))
+
+    await gateway.search("q", policy)
+
+    assert provider.calls[0][2] == ()
 
 
 @pytest.mark.asyncio
@@ -301,7 +316,7 @@ async def test_gateway_records_provider_errors_without_failing_successful_provid
         ]
     )
 
-    with caplog.at_level(logging.WARNING, logger="vanguard.search_gateway"):
+    with caplog.at_level(logging.WARNING, logger="vanguard.research.search_gateway"):
         response = await gateway.search("q", SearchPolicy())
 
     assert [result.url for result in response.results] == ["https://example.com/a"]
@@ -367,9 +382,10 @@ def test_diversity_helpers():
 def test_normalization_helpers():
     assert normalize_domain("https://www.Example.com:443/path") == "example.com"
     assert (
-        normalize_url("HTTPS://www.Example.com/path/?utm_source=x&b=2&a=1#section")
+        normalize_url_for_deduplication("HTTPS://www.Example.com/path/?utm_source=x&b=2&a=1#section")
         == "https://example.com/path?a=1&b=2"
     )
+    assert normalize_search_query(" latest\n  AI\tchips   guidance ") == "latest AI chips guidance"
 
 
 def test_required_api_key_raises_clear_error():
