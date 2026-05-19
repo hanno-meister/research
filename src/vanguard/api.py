@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 from functools import lru_cache
 import logging
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
@@ -57,7 +59,11 @@ async def run_research(
     if request.end_date is not None:
         graph_input["end_date"] = request.end_date
 
-    result = await graph.ainvoke(graph_input, context=runtime_config)
+    with TemporaryDirectory(prefix="vanguard-evidence-") as evidence_dir:
+        result = await graph.ainvoke(
+            graph_input,
+            context=_runtime_config_with_evidence_root(runtime_config, Path(evidence_dir)),
+        )
     return ResearchResponse(
         final_report=result.get("final_report") if isinstance(result.get("final_report"), str) else None,
         status=_research_status(result),
@@ -76,6 +82,12 @@ def _research_status(result: dict[str, object]) -> str:
     if not isinstance(latest_review, dict):
         return "unreviewed"
     return "sufficient" if latest_review.get("sufficient") is True else "insufficient"
+
+
+def _runtime_config_with_evidence_root(runtime_config: LangGraphConfig, evidence_root: Path):
+    if hasattr(runtime_config, "model_copy"):
+        return runtime_config.model_copy(update={"evidence_root": evidence_root})
+    return runtime_config
 
 
 def _count_dicts(value: object) -> int:

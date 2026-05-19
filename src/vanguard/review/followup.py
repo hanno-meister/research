@@ -8,11 +8,11 @@ from typing import Any
 from langgraph.runtime import Runtime
 
 from vanguard.langgraph_configuration import LangGraphConfig
-from vanguard.planning import ResearchTask, _sanitized_tasks
-from vanguard.research.agent import create_research_agent, filesystem_backend
+from vanguard.contracts import ResearchTask
+from vanguard.planning import _sanitized_tasks
+from vanguard.research.agent import create_research_agent, filesystem_backend_for_config
 from vanguard.research.models import ResearchAgentOutput, ResearchSearchBudget
 from vanguard.research.node import (
-    MAX_SEARCH_CALLS_PER_WORKER,
     ResearchWorkerTask,
     _agent_input,
     _allowed_domains_from_state,
@@ -25,8 +25,8 @@ from vanguard.research.node import (
 )
 from vanguard.research.policy import search_context_from_state
 from vanguard.research.recorder import ResearchRunRecorder
+from vanguard.research.defaults import MAX_SEARCH_CALLS_PER_WORKER
 from vanguard.state import AgentState
-from vanguard.utils.urls import normalize_domain
 
 
 def follow_up_worker_tasks(
@@ -40,27 +40,20 @@ def follow_up_worker_tasks(
         return []
 
     allowed_domains = _allowed_domains_from_state(state)
-    valid_tasks = [
-        task
-        for task in tasks
-        if task.objective.strip() and _task_is_feasible_under_allowed_domains(task, allowed_domains)
-    ]
+    valid_tasks = [task for task in tasks if task.objective.strip()]
     task_limit = min(remaining_workers, remaining_workers_by_search_budget, len(valid_tasks))
     if task_limit <= 0:
         return []
-    sanitized = _sanitized_tasks(valid_tasks[:task_limit], state, state.get("research_brief", ""), collapse=False)
+    sanitized = _sanitized_tasks(
+        valid_tasks[:task_limit],
+        state,
+        state.get("research_brief", ""),
+        id_prefix="follow-up",
+    )
     return [
         _worker_task_from_mapping(task.model_dump(), index, allowed_domains)
         for index, task in enumerate(sanitized, start=1)
     ]
-
-
-def _task_is_feasible_under_allowed_domains(task: ResearchTask, allowed_domains: set[str]) -> bool:
-    if not allowed_domains or not task.focused_domains:
-        return True
-    focused_domains = {normalize_domain(domain) for domain in task.focused_domains if domain.strip()}
-    return bool(focused_domains & allowed_domains)
-
 
 async def run_follow_up_workers(
     state: AgentState,
@@ -69,7 +62,7 @@ async def run_follow_up_workers(
     *,
     max_search_calls_per_worker: int,
 ) -> tuple[dict[str, Any], int]:
-    backend = filesystem_backend()
+    backend = filesystem_backend_for_config(runtime.context)
     recorder = ResearchRunRecorder.from_existing_records(
         state.get("research_sources", []),
         state.get("evidence_artifacts", []),

@@ -10,28 +10,27 @@ from langgraph.runtime import Runtime
 
 from vanguard.langgraph_configuration import LangGraphConfig
 from vanguard.state import AgentState
-from vanguard.utils.urls import normalize_domain
+from vanguard.utils.urls import normalize_domain, normalize_domains
 
-from .agent import create_research_agent, filesystem_backend
+from .agent import create_research_agent, filesystem_backend_for_config
+from .defaults import MAX_SEARCH_CALLS_PER_WORKER
 from .models import ResearchAgentOutput, ResearchFinding, ResearchSearchBudget
 from .policy import search_context_from_state
+from .prompts import RESEARCH_WORKER_TASK_PROMPT
 from .recorder import ResearchRunRecorder
 
 
 logger = logging.getLogger(__name__)
-
-MAX_SEARCH_CALLS_PER_WORKER = 2
-
 
 async def conduct_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
     research_brief = state.get("research_brief")
     if not research_brief:
         raise ValueError("Missing research_brief. Did write_research_brief run?")
 
-    backend = filesystem_backend()
+    tasks = _worker_tasks(state, research_brief)
+    backend = filesystem_backend_for_config(runtime.context)
     recorder = ResearchRunRecorder()
     agent = create_research_agent(runtime.context, backend=backend)
-    tasks = _worker_tasks(state, research_brief)
     logger.info(
         "Starting bounded research workers",
         extra={
@@ -86,7 +85,6 @@ class ResearchWorkerTask:
     objective: str
     boundaries: tuple[str, ...] = ()
     key_questions: tuple[str, ...] = ()
-    preferred_source_types: tuple[str, ...] = ()
     focused_domains: tuple[str, ...] = ()
     expected_output: str = ""
     effort: str = "medium"
@@ -108,7 +106,7 @@ async def _run_research_worker(
         recorder,
         default_query=_task_default_query(task, state, research_brief),
         default_highlight_query=_task_highlight_query(task, research_brief),
-        focused_domains=task.focused_domains,
+        focused_domains=(),
         task_id=task.id,
         search_budget=ResearchSearchBudget(
             max_search_calls=MAX_SEARCH_CALLS_PER_WORKER
@@ -155,17 +153,10 @@ def _agent_input(
     return {
         "messages": [
             HumanMessage(
-                content=(
-                    "Conduct bounded research for exactly one focused task. Use the "
-                    "search_gateway tool, cite only source_id values and raw_content_path "
-                    "values returned by the tool, and return only compact structured "
-                    "findings and diversity notes. Stay within the task objective and "
-                    "boundaries; do not research unrelated plan tasks. Do not return "
-                    "source lists, evidence artifacts, provider counts, or domain counts; "
-                    "those are tracked automatically. You have a hard budget of "
-                    f"{search_call_budget} search_gateway calls for this task.\n\n"
-                    f"Research brief:\n{research_brief}"
-                    f"{_worker_task_text(task)}"
+                content=RESEARCH_WORKER_TASK_PROMPT.format(
+                    search_call_budget=search_call_budget,
+                    research_brief=research_brief,
+                    worker_task_text=_worker_task_text(task),
                 )
             )
         ]
@@ -173,13 +164,12 @@ def _agent_input(
 
 
 def _worker_task_text(task: ResearchWorkerTask) -> str:
-    return "\n\nFocused worker task:\n" + "\n".join(
+    return "\n".join(
         [
             f"- id: {task.id}",
             f"- objective: {task.objective}",
             f"- boundaries: {list(task.boundaries)}",
             f"- key_questions: {list(task.key_questions)}",
-            f"- preferred_source_types: {list(task.preferred_source_types)}",
             f"- focused_domains: {list(task.focused_domains)}",
             f"- expected_output: {task.expected_output}",
             f"- effort: {task.effort}",
@@ -190,13 +180,7 @@ def _worker_task_text(task: ResearchWorkerTask) -> str:
 def _worker_tasks(state: AgentState, research_brief: str) -> list[ResearchWorkerTask]:
     research_tasks = state.get("research_tasks") or []
     if not research_tasks:
-        return [
-            ResearchWorkerTask(
-                id="task-1",
-                objective=state.get("research_intent") or research_brief,
-                expected_output="Compact findings with source IDs and evidence paths.",
-            )
-        ]
+        raise ValueError("Missing research_tasks. Did plan_research run?")
 
     allowed_domains = _allowed_domains_from_state(state)
     return [
@@ -213,7 +197,6 @@ def _worker_task_from_mapping(
         objective=_string_field(task, "objective"),
         boundaries=tuple(_string_sequence(task.get("boundaries"))),
         key_questions=tuple(_string_sequence(task.get("key_questions"))),
-        preferred_source_types=tuple(_string_sequence(task.get("preferred_source_types"))),
         focused_domains=tuple(
             _focused_domains(task.get("focused_domains"), allowed_domains)
         ),
@@ -294,7 +277,7 @@ def _string_sequence(value: object) -> list[str]:
 
 
 def _allowed_domains_from_state(state: AgentState) -> set[str]:
-    return {normalize_domain(domain) for domain in state.get("allowed_domains", [])}
+    return set(normalize_domains(state.get("allowed_domains", [])))
 
 
 def _focused_domains(value: object, allowed_domains: set[str]) -> list[str]:

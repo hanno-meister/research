@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -24,6 +25,23 @@ class FakeGraph:
             "search_provider_counts": {"exa": 1},
             "search_domain_counts": {"example.com": 1},
         }
+
+
+class CopyableRuntimeConfig:
+    def __init__(self, evidence_root: Path | None = None) -> None:
+        self.evidence_root = evidence_root
+
+    def model_copy(self, *, update: dict[str, object]):
+        evidence_root = update.get("evidence_root")
+        return CopyableRuntimeConfig(evidence_root=evidence_root if isinstance(evidence_root, Path) else None)
+
+
+class EvidenceRootCheckingGraph(FakeGraph):
+    async def ainvoke(self, graph_input: dict[str, object], *, context: object):
+        assert isinstance(context, CopyableRuntimeConfig)
+        assert isinstance(context.evidence_root, Path)
+        assert context.evidence_root.exists()
+        return await super().ainvoke(graph_input, context=context)
 
 
 def test_research_endpoint_maps_request_to_graph_input():
@@ -99,3 +117,20 @@ def test_research_endpoint_verbose_response_includes_debug_state():
     assert body["status"] == "sufficient"
     assert body["debug"]["research_tasks"] == [{"task_id": "task-1", "description": "Task"}]
     assert body["debug"]["research_sources"] == [{"source_id": "S1", "url": "https://example.com"}]
+
+
+def test_research_endpoint_uses_temporary_evidence_root_for_copyable_config():
+    fake_graph = EvidenceRootCheckingGraph()
+    app.dependency_overrides[get_compiled_graph] = lambda: fake_graph
+    app.dependency_overrides[get_runtime_config] = lambda: CopyableRuntimeConfig()
+
+    try:
+        response = TestClient(app).post("/research", json={"human_message": "Research temporary storage"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    _graph_input, context = fake_graph.calls[0]
+    assert isinstance(context, CopyableRuntimeConfig)
+    assert isinstance(context.evidence_root, Path)
+    assert not context.evidence_root.exists()

@@ -1,6 +1,7 @@
 """LangChain research agent construction."""
 
 from pathlib import Path
+from typing import Any
 
 from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends.filesystem import FilesystemBackend
@@ -31,7 +32,7 @@ Rules:
 
 
 def create_research_agent(config: LangGraphConfig, backend: CompositeBackend | None = None):
-    backend = backend or filesystem_backend()
+    backend = backend or filesystem_backend_for_config(config)
     model = ChatOpenAI(
         model=config.small_model,
         base_url=config.openai_base_url,
@@ -48,8 +49,8 @@ def create_research_agent(config: LangGraphConfig, backend: CompositeBackend | N
     )
 
 
-def filesystem_backend(root_dir: Path | None = None) -> CompositeBackend:
-    evidence_root = root_dir or Path(".vanguard").resolve()
+def filesystem_backend_for_config(config: Any | None = None) -> CompositeBackend:
+    evidence_root = Path(getattr(config, "evidence_root", None) or ".vanguard").resolve()
     return CompositeBackend(
         default=StateBackend(),
         routes={

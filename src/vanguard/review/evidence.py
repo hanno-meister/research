@@ -1,6 +1,6 @@
 """Controlled raw evidence reads for review."""
 
-from vanguard.research.agent import filesystem_backend
+from vanguard.research.agent import filesystem_backend_for_config
 from vanguard.state import AgentState
 
 from .defaults import MAX_EVIDENCE_READ_CHARACTERS
@@ -12,12 +12,13 @@ def read_selected_evidence(
     requests: list[EvidenceReadRequest],
     *,
     remaining_reads: int,
+    backend=None,
 ) -> tuple[list[dict[str, str | int]], list[dict[str, str | int]]]:
     if remaining_reads <= 0:
         return [], []
 
     paths_by_source_id = _raw_content_paths_by_source_id(state)
-    backend = filesystem_backend()
+    backend = backend or filesystem_backend_for_config()
     snippets = []
     records = []
     seen_source_ids: set[str] = set()

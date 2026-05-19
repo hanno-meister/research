@@ -9,14 +9,19 @@ from langchain_openai import ChatOpenAI
 from langgraph.runtime import Runtime
 
 from vanguard.langgraph_configuration import LangGraphConfig
-from vanguard.research.node import MAX_SEARCH_CALLS_PER_WORKER
+from vanguard.research.agent import filesystem_backend_for_config
 from vanguard.state import AgentState
 
-from .defaults import MAX_EVIDENCE_READS, MAX_FOLLOW_UP_SEARCHES, MAX_FOLLOW_UP_WORKERS, MAX_REVIEW_ROUNDS
+from .defaults import (
+    MAX_EVIDENCE_READS,
+    MAX_FOLLOW_UP_SEARCHES,
+    MAX_FOLLOW_UP_WORKERS,
+    MAX_REVIEW_ROUNDS,
+)
 from .evidence import read_selected_evidence
 from .followup import follow_up_worker_tasks, run_follow_up_workers
 from .models import EvidenceReadRequest, ResearchEvaluation
-from .prompts import review_prompt
+from .prompts import REVIEW_RESEARCH_PROMPT
 
 
 async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
@@ -26,6 +31,7 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
         raise ValueError("Missing research_brief. Did write_research_brief run?")
 
     model = _review_model(runtime.context)
+    backend = filesystem_backend_for_config(runtime.context)
     reviews: list[dict[str, object]] = []
     evidence_read_records: list[dict[str, str | int]] = []
     evidence_snippets: list[dict[str, str | int]] = []
@@ -48,6 +54,7 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
             current_state,
             evaluation.evidence_to_read,
             remaining_reads=MAX_EVIDENCE_READS - evidence_reads_used,
+            backend=backend,
         )
         evidence_reads_used += len(round_reads)
         evidence_snippets.extend(round_reads)
@@ -74,7 +81,7 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
 
         remaining_workers = MAX_FOLLOW_UP_WORKERS - workers_used
         remaining_searches = MAX_FOLLOW_UP_SEARCHES - searches_used
-        searches_per_worker = max(1, min(MAX_SEARCH_CALLS_PER_WORKER, remaining_searches))
+        searches_per_worker = max(1, remaining_searches)
         follow_up_tasks = follow_up_worker_tasks(
             evaluation.follow_up_tasks,
             current_state,
@@ -119,9 +126,17 @@ async def _evaluate(
     response = await model.ainvoke(
         [
             HumanMessage(
-                content=review_prompt(
-                    state,
+                content=REVIEW_RESEARCH_PROMPT.format(
                     round_number=round_number,
+                    research_brief=state.get("research_brief", ""),
+                    research_tasks=state.get("research_tasks", []),
+                    research_findings=state.get("research_findings", []),
+                    research_sources=state.get("research_sources", []),
+                    evidence_artifacts=state.get("evidence_artifacts", []),
+                    research_feasibility_notes=state.get("research_feasibility_notes", []),
+                    source_diversity_notes=state.get("source_diversity_notes", []),
+                    search_provider_counts=state.get("search_provider_counts", {}),
+                    search_domain_counts=state.get("search_domain_counts", {}),
                     evidence_snippets=evidence_snippets,
                 )
             )
@@ -149,6 +164,9 @@ def _review_record(
         "weak_or_unsupported_findings": evaluation.weak_or_unsupported_findings,
         "evidence_requested": [request.model_dump() for request in requested],
         "evidence_read": read_records,
+        "selected_report_sources": [
+            source.model_dump() for source in evaluation.selected_report_sources
+        ],
         "follow_up_tasks": [task.model_dump() for task in evaluation.follow_up_tasks],
     }
 

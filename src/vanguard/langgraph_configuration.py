@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import BaseModel, SecretStr
 
 try:
@@ -17,3 +19,4 @@ class LangGraphConfig(BaseModel):
   exa_api_key: SecretStr | None = config.exa_api_key
   tavily_api_key: SecretStr | None = config.tavily_api_key
   max_research_iterations: int = 3
+  evidence_root: Path | None = None
