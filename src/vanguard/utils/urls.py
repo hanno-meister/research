@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .collections import unique_preserving_order
@@ -25,6 +26,65 @@ def normalize_domain(domain: str) -> str:
     if value.startswith("www."):
         value = value[4:]
     return value.rstrip(".")
+
+
+@dataclass(frozen=True)
+class AllowedUrlTarget:
+    domain: str
+    path_prefix: str = ""
+
+
+def normalize_allowed_url_target(target: str) -> AllowedUrlTarget:
+    value = target.strip()
+    if not value:
+        return AllowedUrlTarget(domain="")
+    if "://" in value:
+        parts = urlsplit(value)
+        domain = normalize_domain(parts.netloc)
+        path = parts.path or ""
+    else:
+        if "/" in value:
+            domain_part, path_part = value.split("/", 1)
+            domain = normalize_domain(domain_part)
+            path = "/" + path_part
+        else:
+            domain = normalize_domain(value)
+            path = ""
+    if path and not path.startswith("/"):
+        path = "/" + path
+    if path and not path.endswith("/"):
+        path = path + "/"
+    return AllowedUrlTarget(domain=domain, path_prefix=path)
+
+
+def normalize_allowed_url_targets(targets: Iterable[str]) -> tuple[AllowedUrlTarget, ...]:
+    return tuple(
+        unique_preserving_order(
+            normalize_allowed_url_target(target)
+            for target in targets
+            if target and target.strip()
+        )
+    )
+
+
+def allowed_url_target_matches_url(target: AllowedUrlTarget, url: str) -> bool:
+    parts = urlsplit(url)
+    domain = normalize_domain(parts.netloc)
+    if domain != target.domain:
+        return False
+    if not target.path_prefix:
+        return True
+    path = parts.path or "/"
+    prefix = target.path_prefix
+    return path.startswith(prefix)
+
+
+def allowed_url_target_contains_target(container: AllowedUrlTarget, candidate: AllowedUrlTarget) -> bool:
+    if container.domain != candidate.domain:
+        return False
+    if not container.path_prefix:
+        return True
+    return candidate.path_prefix.startswith(container.path_prefix)
 
 
 def normalize_domains(domains: Iterable[str]) -> tuple[str, ...]:

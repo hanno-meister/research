@@ -37,6 +37,7 @@ class ResearchAgentContext:
     focused_domains: tuple[str, ...]
     task_id: str | None
     search_budget: ResearchSearchBudget
+    results_per_provider: int
     filesystem_backend: Any
     recorder: ResearchRunRecorder
 

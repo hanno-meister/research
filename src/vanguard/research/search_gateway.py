@@ -27,7 +27,12 @@ from vanguard.research.search_gateway_models import (
     SearchPolicy,
     SearchProvider,
 )
-from vanguard.utils.urls import normalize_domains
+from vanguard.utils.urls import (
+    allowed_url_target_contains_target,
+    allowed_url_target_matches_url,
+    normalize_allowed_url_targets,
+    normalize_domains,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -125,8 +130,8 @@ class SearchGateway:
         if not focused_domains:
             return ()
 
-        normalized_focused_domains = normalize_domains(focused_domains)
-        if not normalized_focused_domains:
+        normalized_focused_targets = normalize_allowed_url_targets(focused_domains)
+        if not normalized_focused_targets:
             return ()
 
         if not policy.allowed_domains:
@@ -134,16 +139,21 @@ class SearchGateway:
                 "focused_domains cannot be used when allowed_domains is unconstrained"
             )
 
-        disallowed_focused_domains = sorted(
-            set(normalized_focused_domains) - set(policy.allowed_domains)
-        )
+        disallowed_focused_domains = [
+            target
+            for target in normalized_focused_targets
+            if not any(
+                allowed_url_target_contains_target(allowed, target)
+                for allowed in getattr(policy, "allowed_url_targets", ())
+            )
+        ]
         if disallowed_focused_domains:
             raise SearchGatewayError(
                 "focused_domains must be a subset of allowed_domains: "
-                + ", ".join(disallowed_focused_domains)
+                + ", ".join(f"{target.domain}{target.path_prefix}" for target in disallowed_focused_domains)
             )
 
-        return normalized_focused_domains
+        return tuple(target.domain for target in normalized_focused_targets)
 
 
 class ExaSearchAdapter:
@@ -403,8 +413,12 @@ def enforce_domain_policy(
 
     accepted = []
     rejected = []
+    allowed_targets = getattr(policy, "allowed_url_targets", ())
     for result in results:
-        if result.canonical_domain in allowed_domains:
+        if result.canonical_domain in allowed_domains and (
+            not allowed_targets
+            or any(allowed_url_target_matches_url(target, result.url) for target in allowed_targets)
+        ):
             accepted.append(result)
         else:
             rejected.append(RejectedSearchResult(result=result, reason="domain_not_allowed"))

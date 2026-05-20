@@ -4,7 +4,11 @@ import logging
 from typing import Any
 
 from langchain.tools import ToolRuntime, tool
-from vanguard.utils.urls import normalize_search_query
+from vanguard.utils.urls import (
+    allowed_url_target_contains_target,
+    normalize_allowed_url_targets,
+    normalize_search_query,
+)
 
 from .defaults import default_search_gateway
 from .evidence import write_evidence_file
@@ -65,6 +69,7 @@ async def _run_search_gateway_tool(
             "duplicates_removed": 0,
         }
     resolved_highlight_query = normalize_search_query(highlight_query or resolved_query)
+    focused_domains = _sanitize_focused_domains(context.focused_domains, context.search_policy.allowed_url_targets)
     logger.info(
         "Running search gateway tool",
         extra={
@@ -80,10 +85,10 @@ async def _run_search_gateway_tool(
             else None,
         },
     )
-    result = await default_search_gateway().search(
+    result = await _search_gateway_for_context(context).search(
         query=resolved_query,
         policy=context.search_policy,
-        focused_domains=context.focused_domains,
+        focused_domains=focused_domains,
         highlight_query=resolved_highlight_query,
     )
     evidence_by_url = {
@@ -124,6 +129,30 @@ async def _run_search_gateway_tool(
         },
     )
     return response
+
+
+def _search_gateway_for_context(context: ResearchAgentContext):
+    try:
+        return default_search_gateway(results_per_provider=context.results_per_provider)
+    except TypeError:
+        return default_search_gateway()
+
+
+def _sanitize_focused_domains(
+    focused_domains: tuple[str, ...],
+    allowed_url_targets,
+) -> tuple[str, ...]:
+    if not focused_domains:
+        return ()
+    normalized_targets = normalize_allowed_url_targets(focused_domains)
+    if not normalized_targets:
+        return ()
+    valid_targets = [
+        target
+        for target in normalized_targets
+        if any(allowed_url_target_contains_target(allowed, target) for allowed in allowed_url_targets)
+    ]
+    return tuple(target.domain for target in valid_targets)
 
 
 def _serialize_search_result(item, evidence_artifact=None) -> dict[str, str | None]:

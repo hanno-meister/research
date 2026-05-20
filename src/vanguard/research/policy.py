@@ -23,6 +23,7 @@ def search_context_from_state(
     focused_domains: tuple[str, ...] = (),
     task_id: str | None = None,
     search_budget: ResearchSearchBudget | None = None,
+    results_per_provider: int | None = None,
 ) -> ResearchAgentContext:
     return ResearchAgentContext(
         search_policy=_search_policy_from_state(state),
@@ -31,6 +32,7 @@ def search_context_from_state(
         focused_domains=focused_domains,
         task_id=task_id,
         search_budget=search_budget or ResearchSearchBudget(max_search_calls=1),
+        results_per_provider=results_per_provider or 5,
         filesystem_backend=filesystem_backend,
         recorder=recorder,
     )

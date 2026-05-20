@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 import logging
+from typing import cast
 
 import pytest
 
@@ -14,12 +15,15 @@ from vanguard.research.search_gateway import (
     underrepresented_domains,
     _required_api_key,
 )
+from vanguard.research.defaults import default_search_gateway
 from vanguard.research.search_gateway_models import (
     NormalizedSearchResult,
     SearchGatewayError,
     SearchPolicy,
 )
 from vanguard.utils.urls import (
+    allowed_url_target_matches_url,
+    normalize_allowed_url_target,
     normalize_domain,
     normalize_search_query,
     normalize_url_for_deduplication,
@@ -46,6 +50,20 @@ def test_search_policy_normalizes_optional_domains_and_dates():
     assert policy.allowed_domains == ("example.com", "docs.example.com")
     assert policy.start_date == date(2025, 1, 1)
     assert policy.end_date == date(2025, 12, 31)
+
+
+def test_allowed_url_target_normalization_preserves_path_prefix():
+    assert normalize_allowed_url_target("https://aws.amazon.com/blogs/aws") == normalize_allowed_url_target(
+        "aws.amazon.com/blogs/aws/"
+    )
+    assert allowed_url_target_matches_url(
+        normalize_allowed_url_target("aws.amazon.com/blogs/aws/"),
+        "https://aws.amazon.com/blogs/aws/x",
+    )
+    assert not allowed_url_target_matches_url(
+        normalize_allowed_url_target("aws.amazon.com/blogs/aws/"),
+        "https://aws.amazon.com/blogs/physical-ai/x",
+    )
 
 
 def test_search_policy_allows_empty_constraints():
@@ -185,6 +203,15 @@ def test_tavily_adapter_omits_raw_content_by_default():
     assert adapter.include_raw_content is False
 
 
+def test_default_search_gateway_configures_results_per_provider():
+    gateway = default_search_gateway(results_per_provider=10)
+
+    exa = cast(ExaSearchAdapter, gateway.providers[0])
+    tavily = cast(TavilySearchAdapter, gateway.providers[1])
+    assert exa.num_results == 10
+    assert tavily.max_results == 10
+
+
 class FakeProvider:
     name = "fake"
 
@@ -207,7 +234,7 @@ class FailingProvider:
 
 
 @pytest.mark.asyncio
-async def test_gateway_logs_provider_result_metadata(caplog):
+async def test_gateway_logs_provider_result_counts_without_result_metadata(caplog):
     gateway = SearchGateway(
         [
             FakeProvider(
@@ -230,9 +257,9 @@ async def test_gateway_logs_provider_result_metadata(caplog):
         await gateway.search("q", SearchPolicy())
 
     assert "Search provider completed: provider=fake result_count=1" in caplog.text
-    assert "https://example.com/a" in caplog.text
-    assert "canonical_domain" in caplog.text
-    assert "raw_content_characters" in caplog.text
+    assert "https://example.com/a" not in caplog.text
+    assert "canonical_domain" not in caplog.text
+    assert "raw_content_characters" not in caplog.text
     assert "Full source text" not in caplog.text
 
 
@@ -267,6 +294,18 @@ async def test_gateway_uses_focused_domains_for_provider_narrowing_but_filters_b
 
 
 @pytest.mark.asyncio
+async def test_gateway_rejects_focused_domains_outside_path_prefix_allowlist():
+    gateway = SearchGateway([FakeProvider([])])
+
+    with pytest.raises(SearchGatewayError, match="focused_domains must be a subset of allowed_domains"):
+        await gateway.search(
+            "q",
+            SearchPolicy(allowed_domains=("aws.amazon.com/blogs/aws/",)),
+            focused_domains=["aws.amazon.com/blogs/physical-ai/"],
+        )
+
+
+@pytest.mark.asyncio
 async def test_gateway_uses_policy_allowlist_when_focused_domains_are_empty():
     provider = FakeProvider([])
     gateway = SearchGateway([provider])
@@ -291,6 +330,48 @@ async def test_gateway_enforces_allowed_domains_after_provider_return():
     assert [item.result.canonical_domain for item in response.rejected_results] == ["offpolicy.com"]
     assert response.provider_counts == {"exa": 1}
     assert response.domain_counts == {"example.com": 1}
+
+
+@pytest.mark.asyncio
+async def test_gateway_enforces_allowed_url_path_prefixes():
+    results = [
+        NormalizedSearchResult(provider="exa", query="q", url="https://aws.amazon.com/blogs/aws/x"),
+        NormalizedSearchResult(provider="exa", query="q", url="https://aws.amazon.com/blogs/physical-ai/x"),
+    ]
+    gateway = SearchGateway([FakeProvider(results)])
+
+    response = await gateway.search("q", SearchPolicy(allowed_domains=("aws.amazon.com/blogs/aws/",)))
+
+    assert [result.normalized_url for result in response.results] == ["https://aws.amazon.com/blogs/aws/x"]
+    assert [item.result.normalized_url for item in response.rejected_results] == [
+        "https://aws.amazon.com/blogs/physical-ai/x"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_allows_any_path_for_pure_domain_allowlist():
+    gateway = SearchGateway(
+        [
+            FakeProvider(
+                [NormalizedSearchResult(provider="exa", query="q", url="https://aws.amazon.com/blogs/physical-ai/x")]
+            )
+        ]
+    )
+
+    response = await gateway.search("q", SearchPolicy(allowed_domains=("aws.amazon.com",)))
+
+    assert [result.normalized_url for result in response.results] == ["https://aws.amazon.com/blogs/physical-ai/x"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_accepts_no_scheme_path_prefix_allowlist():
+    gateway = SearchGateway(
+        [FakeProvider([NormalizedSearchResult(provider="exa", query="q", url="https://aws.amazon.com/blogs/aws/x")])]
+    )
+
+    response = await gateway.search("q", SearchPolicy(allowed_domains=("aws.amazon.com/blogs/aws",)))
+
+    assert [result.normalized_url for result in response.results] == ["https://aws.amazon.com/blogs/aws/x"]
 
 
 @pytest.mark.asyncio

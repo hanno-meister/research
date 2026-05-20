@@ -7,7 +7,9 @@ from datetime import date
 from typing import Protocol
 
 from vanguard.utils.urls import (
+    AllowedUrlTarget,
     canonical_domain_from_url,
+    normalize_allowed_url_targets,
     normalize_domains,
     normalize_url_for_deduplication,
 )
@@ -28,11 +30,14 @@ class SearchPolicy:
     """
 
     allowed_domains: tuple[str, ...] = ()
+    allowed_url_targets: tuple[AllowedUrlTarget, ...] = field(init=False, default=())
     start_date: date | None = None
     end_date: date | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "allowed_domains", normalize_domains(self.allowed_domains))
+        raw_allowed_domains = tuple(self.allowed_domains)
+        object.__setattr__(self, "allowed_url_targets", normalize_allowed_url_targets(raw_allowed_domains))
+        object.__setattr__(self, "allowed_domains", normalize_domains(raw_allowed_domains))
 
         if self.start_date and self.end_date and self.start_date > self.end_date:
             raise SearchGatewayError("start_date must be before or equal to end_date")
