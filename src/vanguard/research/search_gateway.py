@@ -101,10 +101,9 @@ class SearchGateway:
         try:
             results = await provider.search(query, policy, focused_domains, highlight_query)
             logger.info(
-                "Search provider completed: provider=%s result_count=%s results=%s",
+                "Search provider completed: provider=%s result_count=%s",
                 provider.name,
                 len(results),
-                _search_result_log_records(results),
             )
             return results, None
         except Exception as exc:  # noqa: BLE001 - external provider failures must not abort graph runs
