@@ -6,7 +6,7 @@ from langgraph.graph import StateGraph, START, END
 from .brief import write_research_brief
 from .langgraph_configuration import LangGraphConfig
 from .planning import plan_research
-from .report import final_report_generation
+from .report_generation import final_report_generation
 from .review import review_research
 from .research import conduct_research
 from .state import AgentInputState, AgentState

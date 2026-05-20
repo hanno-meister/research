@@ -29,6 +29,16 @@ class ReviewedSource(BaseModel):
     reason: str = Field(description="Brief reason for this source decision.")
 
 
+class ReviewedFinding(BaseModel):
+    """Reviewer decision about a finding's usefulness for final reporting."""
+
+    finding_id: str = Field(description="Python-owned finding identifier such as F1.")
+    status: Literal["use", "caution", "exclude"] = Field(
+        description="Whether this finding should be used, used cautiously, or excluded from final report synthesis."
+    )
+    reason: str = Field(description="Brief reason for this finding decision.")
+
+
 class ResearchEvaluation(BaseModel):
     """Structured evaluator output for research sufficiency."""
 
@@ -60,6 +70,14 @@ class ResearchEvaluation(BaseModel):
             "missing, indirect, stale, or insufficient."
         ),
     )
+    required_report_topics: list[str] = Field(
+        default_factory=list,
+        description="Important source-supported topics, targets, or dimensions that the final report should cover.",
+    )
+    coverage_gaps: list[str] = Field(
+        default_factory=list,
+        description="Important target terms, topics, or dimensions that remain missing, weakly supported, or undercovered under the current runtime constraints.",
+    )
     evidence_to_read: list[EvidenceReadRequest] = Field(
         default_factory=list,
         description=(
@@ -73,6 +91,10 @@ class ResearchEvaluation(BaseModel):
             "Reviewer source decisions for final report synthesis after inspecting "
             "available metadata and any selected raw evidence."
         ),
+    )
+    selected_report_findings: list[ReviewedFinding] = Field(
+        default_factory=list,
+        description="Reviewer finding decisions for final report synthesis.",
     )
     follow_up_tasks: list[ResearchTask] = Field(
         default_factory=list,
