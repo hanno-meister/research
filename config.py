@@ -4,7 +4,7 @@ from pathlib import Path
 from pydantic import BaseModel, SecretStr
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 class Config(BaseModel):
     small_model: str
