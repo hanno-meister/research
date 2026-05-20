@@ -13,7 +13,7 @@ from vanguard.state import AgentState
 from vanguard.utils.urls import normalize_domain, normalize_domains
 
 from .agent import create_research_agent, filesystem_backend_for_config
-from .defaults import MAX_SEARCH_CALLS_PER_WORKER
+from .defaults import INITIAL_SEARCH_RESULTS_PER_PROVIDER, MAX_SEARCH_CALLS_PER_WORKER
 from .models import ResearchAgentOutput, ResearchFinding, ResearchSearchBudget
 from .policy import search_context_from_state
 from .prompts import RESEARCH_WORKER_TASK_PROMPT
@@ -89,6 +89,7 @@ class ResearchWorkerTask:
     objective: str
     boundaries: tuple[str, ...] = ()
     key_questions: tuple[str, ...] = ()
+    target_terms: tuple[str, ...] = ()
     focused_domains: tuple[str, ...] = ()
     expected_output: str = ""
     effort: str = "medium"
@@ -115,6 +116,7 @@ async def _run_research_worker(
         search_budget=ResearchSearchBudget(
             max_search_calls=MAX_SEARCH_CALLS_PER_WORKER
         ),
+        results_per_provider=INITIAL_SEARCH_RESULTS_PER_PROVIDER,
     )
     logger.info(
         "Starting research worker",
@@ -174,6 +176,7 @@ def _worker_task_text(task: ResearchWorkerTask) -> str:
             f"- objective: {task.objective}",
             f"- boundaries: {list(task.boundaries)}",
             f"- key_questions: {list(task.key_questions)}",
+            f"- target_terms: {list(task.target_terms)}",
             f"- focused_domains: {list(task.focused_domains)}",
             f"- expected_output: {task.expected_output}",
             f"- effort: {task.effort}",
@@ -201,6 +204,7 @@ def _worker_task_from_mapping(
         objective=_string_field(task, "objective"),
         boundaries=tuple(_string_sequence(task.get("boundaries"))),
         key_questions=tuple(_string_sequence(task.get("key_questions"))),
+        target_terms=tuple(_string_sequence(task.get("target_terms"))),
         focused_domains=tuple(
             _focused_domains(task.get("focused_domains"), allowed_domains)
         ),
@@ -213,12 +217,14 @@ def _task_default_query(
     task: ResearchWorkerTask, state: AgentState, research_brief: str
 ) -> str:
     parts = [task.objective, *task.key_questions]
+    if task.target_terms:
+        parts.append(" ".join(task.target_terms))
     query = " ".join(part for part in parts if part).strip()
     return query or state.get("research_intent") or research_brief
 
 
 def _task_highlight_query(task: ResearchWorkerTask, research_brief: str) -> str:
-    parts = [research_brief, task.objective, *task.key_questions]
+    parts = [research_brief, task.objective, *task.key_questions, *task.target_terms]
     return "\n".join(part for part in parts if part)
 
 

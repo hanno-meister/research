@@ -39,6 +39,7 @@ async def plan_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
             HumanMessage(
                 content=RESEARCH_PLAN_PROMPT.format(
                     research_intent=state["research_intent"],
+                    selected_lance=_selected_lance_text(state),
                     research_brief=research_brief,
                     runtime_constraints=_runtime_constraints_text(state),
                     max_research_tasks=MAX_RESEARCH_TASKS,
@@ -68,6 +69,19 @@ def _runtime_constraints_text(state: AgentState) -> str:
             f"end_date: {state.get('end_date') or 'none'}",
         ]
     )
+
+
+def _selected_lance_text(state: AgentState) -> str:
+    lance = state.get("selected_lance") or {}
+    if not isinstance(lance, dict):
+        return "none"
+    parts = [
+        f"id: {str(lance.get('id', '')).strip()}",
+        f"name: {str(lance.get('name', '')).strip()}",
+        f"description: {str(lance.get('description', '')).strip()}",
+    ]
+    text = "\n".join(part for part in parts if not part.endswith(": "))
+    return text or "none"
 
 
 def _sanitized_tasks(
@@ -122,6 +136,7 @@ def _sanitize_task(
             "rationale": task.rationale.strip(),
             "boundaries": clean_strings(task.boundaries),
             "key_questions": clean_strings(task.key_questions),
+            "target_terms": clean_strings(task.target_terms),
             "focused_domains": list(focused_domains),
             "expected_output": task.expected_output.strip()
             or "Compact findings with source IDs and evidence paths.",

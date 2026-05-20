@@ -7,6 +7,7 @@ Search query rules:
 - Do not include site:, domain names, OR chains, quoted boolean expressions, or search-engine syntax. Domain restrictions are already enforced by runtime policy.
 - Use source-native topic terms likely to appear in result titles/snippets. For official vendor blogs, use product/ecosystem terms; for arXiv, use technical method, benchmark, and paper-title terms; for expert/news sources, use product names plus launch/capability terms.
 - When this task has focused_domains, adapt the query vocabulary to what those domains likely publish. Do not use generic entity-only queries; combine the entity/system with task-specific concepts and source-appropriate terms.
+- Explicitly check the task's target_terms across your limited search budget. Combine target terms with the task objective and source-native capability or benchmark terms.
 
 Research brief:
 {research_brief}

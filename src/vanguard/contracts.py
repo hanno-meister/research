@@ -36,6 +36,10 @@ class ResearchTask(BaseModel):
         default_factory=list,
         description="Focused questions this task should answer.",
     )
+    target_terms: list[str] = Field(
+        default_factory=list,
+        description="Named systems, benchmarks, labs, datasets, methods, or capability terms this worker should explicitly check. These are search targets, not facts.",
+    )
     focused_domains: list[str] = Field(
         default_factory=list,
         description="Optional focus-domain hints. These do not override runtime policy.",

@@ -33,6 +33,7 @@ class Summary(BaseModel):
 
 class AgentInputState(TypedDict):
     research_intent: str
+    selected_lance: NotRequired[dict[str, str]]
     allowed_domains: NotRequired[list[str]]
     start_date: NotRequired[date | str]
     end_date: NotRequired[date | str]
@@ -42,6 +43,7 @@ class AgentState(TypedDict):
 
     Fields:
         research_intent: User's original research request.
+        selected_lance: Optional internal research Lance context for audience and relevance.
         allowed_domains: Optional hard allowlist for search result domains.
         start_date: Optional lower publication-date bound for searches.
         end_date: Optional upper publication-date bound for searches.
@@ -72,6 +74,7 @@ class AgentState(TypedDict):
     """
 
     research_intent: str
+    selected_lance: NotRequired[dict[str, str]]
     allowed_domains: NotRequired[list[str]]
     start_date: NotRequired[date | str]
     end_date: NotRequired[date | str]

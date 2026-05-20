@@ -55,6 +55,11 @@ def test_research_endpoint_maps_request_to_graph_input():
             "/research",
             json={
                 "human_message": "Research LangGraph agents",
+                "selected_lance": {
+                    "id": "sdlpg",
+                    "name": "Repository Context Graphs",
+                    "description": "Use property graphs for agent context.",
+                },
                 "allowed_domains": ["langchain.com", "docs.langchain.com"],
                 "start_date": "2026-01-01",
                 "end_date": "2026-05-01",
@@ -75,6 +80,11 @@ def test_research_endpoint_maps_request_to_graph_input():
         (
             {
                 "research_intent": "Research LangGraph agents",
+                "selected_lance": {
+                    "id": "sdlpg",
+                    "name": "Repository Context Graphs",
+                    "description": "Use property graphs for agent context.",
+                },
                 "allowed_domains": ["langchain.com", "docs.langchain.com"],
                 "start_date": date(2026, 1, 1),
                 "end_date": date(2026, 5, 1),
