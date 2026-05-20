@@ -35,6 +35,7 @@ class FakeSearchGateway:
                 "policy": policy,
                 "focused_domains": focused_domains,
                 "highlight_query": highlight_query,
+                "results_per_provider": self.results_per_provider,
             }
         )
         results = [
@@ -118,6 +119,16 @@ class ConcurrentFakeResearchAgent(FakeResearchAgent):
 
 class FakeNoSearchResearchAgent:
     async def ainvoke(self, payload, **kwargs):
+        return {
+            "structured_response": research.ResearchAgentOutput(
+                findings=[research.ResearchFinding(summary="Unsupported finding.")],
+            )
+        }
+
+
+class FakeEmptySearchResearchAgent:
+    async def ainvoke(self, payload, **kwargs):
+        kwargs["context"].recorder.search_attempts += 1
         return {
             "structured_response": research.ResearchAgentOutput(
                 findings=[research.ResearchFinding(summary="Unsupported finding.")],

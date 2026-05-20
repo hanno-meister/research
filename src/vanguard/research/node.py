@@ -63,7 +63,11 @@ async def conduct_research(state: AgentState, runtime: Runtime[LangGraphConfig])
     if recorder.search_attempts == 0:
         raise ValueError("Research workers completed without calling search_gateway")
     if findings and not recorder.sources():
-        raise ValueError("Research workers produced findings without recorded sources")
+        logger.warning(
+            "Research workers produced findings without recorded sources; dropping unsupported findings",
+            extra={"finding_count": len(findings)},
+        )
+        findings = []
 
     logger.info(
         "Research workers completed",
