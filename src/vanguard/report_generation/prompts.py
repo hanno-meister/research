@@ -2,7 +2,7 @@
 
 FINAL_REPORT_PROMPT = """Draft a substantive narrative technical trend-scouting report draft with overview paragraphs that explain what the source evidence collectively says.
 Treat the report_bundle as authoritative. Use only bundle.findings, bundle.sources, bundle.required_topics, bundle.coverage_gaps, bundle.contradiction_notes, and bundle.methodology_caveats. Do not invent facts, citations, or source IDs.
-If the request includes a date window, do not cite sources with visible/published dates that clearly fall outside that window; sources with no visible/published date may still be cited when otherwise relevant and credible.
+If the request includes a date window, do not cite sources with visible/published dates that clearly fall outside that window; sources with no visible/published date may still be cited when otherwise relevant and credible. Keep date-window violations, source-exclusion mechanics, and first-pass/repair-process issues out of reader-facing report prose, including Confidence and Gaps; describe only substantive evidence gaps that remain after source filtering.
 For Deep Dive, focus on the most relevant technology for the report; relevance can be interpreted as the technology that appears most frequently or prominently in selected findings.
 Do not include internal source IDs, numeric citations, or parenthetical title-citation lists in prose; the renderer will attach direct source URLs.
 Prefer claim-level citations: fill paragraphs and cited_bullets with source_ids close to the claim they support. Use only source IDs present in bundle.sources.
