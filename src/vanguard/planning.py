@@ -182,9 +182,13 @@ def _sanitize_depends_on(depends_on: list[str], index: int, *, id_prefix: str = 
 
 
 def _planned_task_id(value: str, *, id_prefix: str = "task") -> str:
-    stripped = value.strip()
+    stripped = value.strip().lower()
     if stripped.startswith(f"{id_prefix}-") and stripped.removeprefix(f"{id_prefix}-").isdigit():
         return stripped
+    for prefix in ("t", "task"):
+        suffix = stripped.removeprefix(prefix)
+        if suffix != stripped and suffix.isdigit():
+            return f"{id_prefix}-{suffix}"
     if stripped.isdigit():
         return f"{id_prefix}-{stripped}"
     return stripped

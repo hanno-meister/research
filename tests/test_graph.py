@@ -574,7 +574,7 @@ def test_sanitized_tasks_filters_and_normalizes_domains():
         boundaries=["  scope  "],
         key_questions=["  question  "],
         focused_domains=["https://Example.com/path/article", "docs.example.com", "other.com"],
-        depends_on=["1", "task-2", "task-1"],
+        depends_on=["1", "T2", "Task3", "task-2", "task-1"],
         expected_output="  compact output  ",
         effort="medium",
     )
@@ -583,7 +583,7 @@ def test_sanitized_tasks_filters_and_normalizes_domains():
 
     assert sanitized[0].id == "task-1"
     assert sanitized[0].focused_domains == ["example.com/path/", "docs.example.com"]
-    assert sanitized[0].depends_on == ["task-2"]
+    assert sanitized[0].depends_on == ["task-2", "task-3"]
     assert sanitized[0].boundaries == ["scope"]
     assert sanitized[0].key_questions == ["question"]
     assert sanitized[0].expected_output == "compact output"
