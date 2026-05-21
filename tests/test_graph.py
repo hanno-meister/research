@@ -2309,7 +2309,7 @@ def test_final_report_keeps_overlapping_findings_and_uses_public_citations():
     assert report.startswith("# Trend Report: World Generation Models for Spatial Computing")
     assert "The company launched a new platform for enterprise customers." in report
     assert "The company launched a new enterprise platform" in report
-    assert "Source: https://example.com/launch" in report
+    assert "Source: [Official launch post](https://example.com/launch)" in report
     assert "[1]" not in report
     assert "Official launch post" in report
     assert "S1" not in report
@@ -2424,12 +2424,12 @@ def test_final_report_contiguous_source_numbering_skips_unused_and_excluded_sour
     ))
 
     report = update["final_report"]
-    assert "One (example.com)" in report
-    assert "Three (example.com)" in report
+    assert "One" in report
+    assert "Three" in report
     assert "[3]" not in report
     assert "## Selected Sources" in report
-    assert "One (example.com)" in report
-    assert "Three (example.com)" in report
+    assert "One (example.com)" not in report
+    assert "Three (example.com)" not in report
 
 
 def test_final_report_uses_finding_selection_and_only_cited_sources_in_sources_list():
@@ -2458,7 +2458,8 @@ def test_final_report_uses_finding_selection_and_only_cited_sources_in_sources_l
     report = update["final_report"]
     assert "Old stale finding." not in report
     assert "Follow-up corrected finding." in report
-    assert "Shared source (example.com)" in report
+    assert "Shared source" in report
+    assert "Shared source (example.com)" not in report
 
 
 def test_final_report_backwards_compatibility_without_selected_report_findings():
@@ -2477,7 +2478,8 @@ def test_final_report_backwards_compatibility_without_selected_report_findings()
 
     report = update["final_report"]
     assert "Compat finding." in report
-    assert "Compat source (example.com)" in report
+    assert "Compat source" in report
+    assert "Compat source (example.com)" not in report
 
 
 def test_final_report_sources_render_clickable_links():
@@ -2505,7 +2507,31 @@ def test_final_report_sources_render_clickable_links():
     assert "[Official launch post](https://example.com/launch)" in report
 
 
-def test_final_report_top_sections_render_direct_source_urls(monkeypatch):
+def test_final_report_strips_source_site_suffixes_from_link_titles():
+    update = final_report_generation(report_state(
+        {
+            "research_intent": "intent",
+            "research_findings": [
+                {"summary": "Embodied 3D world modeling supports belief inference.", "source_ids": ["S1"]},
+            ],
+            "research_sources": [
+                {
+                    "source_id": "S1",
+                    "title": "Embodied Belief Inference via Generative 3D World Modeling - arXiv",
+                    "url": "https://arxiv.org/html/2605.11367v1",
+                    "canonical_domain": "arxiv.org",
+                }
+            ],
+            "research_reviews": [{"sufficient": True}],
+        }
+    ))
+
+    report = update["final_report"]
+    assert "[Embodied Belief Inference via Generative 3D World Modeling](https://arxiv.org/html/2605.11367v1)" in report
+    assert "Embodied Belief Inference via Generative 3D World Modeling - arXiv" not in report
+
+
+def test_final_report_top_sections_render_markdown_source_links(monkeypatch):
     from vanguard.report_generation import node as report_node
     from vanguard.report_generation.models import CitedText, ReportDraft, ReportSectionDraft, TeamSuggestionDraft, WhyItMattersDraft
 
@@ -2564,14 +2590,14 @@ def test_final_report_top_sections_render_direct_source_urls(monkeypatch):
     ))
 
     report = update["final_report"]
-    assert "Summary claim one. Sources: https://example.com/one, https://example.com/two, https://example.com/three" in report
-    assert "Summary claim two. Source: https://example.com/two" in report
+    assert "Summary claim one. Sources: [Source one](https://example.com/one), [Source two](https://example.com/two), [Source three](https://example.com/three)" in report
+    assert "Summary claim two. Source: [Source two](https://example.com/two)" in report
     assert "### For the Selected Lance" in report
-    assert "Lance-specific why it matters. Source: https://example.com/two" in report
+    assert "Lance-specific why it matters. Source: [Source two](https://example.com/two)" in report
     assert "### For the IT Consulting Firm" in report
-    assert "Firm-wide why it matters. Source: https://example.com/three" in report
+    assert "Firm-wide why it matters. Source: [Source three](https://example.com/three)" in report
     assert "### Trend bullet" in report
-    assert "Trend bullet. Sources: https://example.com/one, https://example.com/three" in report
+    assert "Trend bullet. Sources: [Source one](https://example.com/one), [Source three](https://example.com/three)" in report
     assert "### 1. Run a focused pilot." in report
     assert "| Owner role | Spatial AI Lead |" in report
     assert "https://example.com/bad" not in report
@@ -2608,12 +2634,12 @@ def test_final_report_caps_urls_per_claim_and_keeps_sources_list_uncapped(monkey
     ))
 
     report = update["final_report"]
-    assert "Many-source claim. Sources: https://example.com/1, https://example.com/2, https://example.com/3" in report
-    assert "Many-source claim. Sources: https://example.com/1, https://example.com/2, https://example.com/3, https://example.com/4" not in report
+    assert "Many-source claim. Sources: [Source 1](https://example.com/1), [Source 2](https://example.com/2), [Source 3](https://example.com/3)" in report
+    assert "Many-source claim. Sources: [Source 1](https://example.com/1), [Source 2](https://example.com/2), [Source 3](https://example.com/3), [Source 4](https://example.com/4)" not in report
     assert "[Source 4](https://example.com/4)" in report
 
 
-def test_final_report_body_uses_direct_source_urls_not_numeric_citations():
+def test_final_report_body_uses_markdown_source_links_not_numeric_citations():
     update = final_report_generation(report_state(
         {
             "research_intent": "intent",
@@ -2630,7 +2656,7 @@ def test_final_report_body_uses_direct_source_urls_not_numeric_citations():
 
     report = update["final_report"]
     assert re.search(r"\[\d+\]", report) is None
-    assert "Sources: https://example.com/one, https://example.com/two" in report
+    assert "Sources: [Source one](https://example.com/one), [Source two](https://example.com/two)" in report
 
 
 def test_final_report_uses_prose_first_rendering_for_analysis_sections(monkeypatch):
@@ -2682,7 +2708,7 @@ def test_final_report_uses_prose_first_rendering_for_analysis_sections(monkeypat
     confidence = report.split("## Confidence and Gaps", 1)[1].split("## Selected Sources", 1)[0]
 
     assert "### Technology Alpha is maturing quickly" in trending
-    assert "Technology Alpha is maturing quickly. It matters for spatial workflows. Source: https://example.com/alpha" in trending
+    assert "Technology Alpha is maturing quickly. It matters for spatial workflows. Source: [Alpha source](https://example.com/alpha)" in trending
     assert "### Technology Beta remains earlier-stage" in trending
     assert "\n- Technology Alpha" not in trending
     assert "\n- Technology Beta" not in trending

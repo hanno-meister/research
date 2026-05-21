@@ -46,7 +46,7 @@ def source_url(src: dict[str, Any]) -> str | None:
 
 
 def source_label(src: dict[str, Any]) -> str:
-    title = src.get("title") or src.get("source_id") or "Source"
+    title = source_title(src)
     domain = src.get("canonical_domain") or ""
     url = source_url(src)
     if url:
@@ -54,17 +54,15 @@ def source_label(src: dict[str, Any]) -> str:
     return f"{title}" + (f" ({domain})" if domain else "")
 
 
-def selected_source_label(index: int, src: dict[str, Any]) -> str:
+def source_title(src: dict[str, Any]) -> str:
     title = sanitize_report_text(str(src.get("title") or src.get("source_id") or "Source"))
-    domain = src.get("canonical_domain") or ""
-    reason = sanitize_report_text(str(src.get("reason") or ""))
+    return re.sub(r"\s+(?:[-–—|:]\s*)?(?:arXiv|NVIDIA Blog|MIT Technology Review)\s*$", "", title, flags=re.IGNORECASE).strip()
+
+
+def selected_source_label(index: int, src: dict[str, Any]) -> str:
+    title = source_title(src)
     linked_title = f"[{title}]({source_url(src)})" if source_url(src) else title
-    label = f"{index}. {linked_title}" + (f" ({domain})" if domain else "")
-    if url := source_url(src):
-        label += f" — {url}"
-    if reason:
-        label += f" — {reason}"
-    return label
+    return f"{index}. {linked_title}"
 
 
 def subsection_title(text: str, fallback: str) -> str:
@@ -97,14 +95,21 @@ def render_cited_subsections(
 
 
 def append_source_urls(text: str, source_ids: list[str], report_sources: dict[str, dict[str, Any]], *, max_urls: int = MAX_URLS_PER_CLAIM) -> str:
-    urls = [u for u in (source_url(report_sources[sid]) for sid in preferred_source_ids(source_ids, report_sources) if sid in report_sources) if u]
-    urls = list(dict.fromkeys(urls))
+    links: list[str] = []
+    seen_urls: set[str] = set()
+    for source_id in preferred_source_ids(source_ids, report_sources):
+        src = report_sources.get(source_id)
+        if not src or not (url := source_url(src)) or url in seen_urls:
+            continue
+        title = source_title(src)
+        links.append(f"[{title}]({url})")
+        seen_urls.add(url)
     if max_urls > 0:
-        urls = urls[:max_urls]
-    if not urls:
+        links = links[:max_urls]
+    if not links:
         return text
-    label = "Source:" if len(urls) == 1 else "Sources:"
-    return f"{text} {label} {', '.join(urls)}"
+    label = "Source:" if len(links) == 1 else "Sources:"
+    return f"{text} {label} {', '.join(links)}"
 
 
 def preferred_source_ids(source_ids: list[str], report_sources: dict[str, dict[str, Any]]) -> list[str]:
