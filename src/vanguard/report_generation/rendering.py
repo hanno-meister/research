@@ -285,13 +285,13 @@ def render_complete_report(state, review: dict[str, Any], findings, report_sourc
     )
     firm_items = draft.why_it_matters.for_firm or [
         CitedText(
-            text="For the wider IT consulting firm, the trend matters because clients will need help separating demos from deployable spatial-computing workflows, integration architectures, governance, and measurable pilots.",
+            text="For the company, the trend matters because clients will need help separating demos from deployable spatial-computing workflows, integration architectures, governance, and measurable pilots.",
             source_ids=draft.limitations.source_ids,
         )
     ]
     lines += ["", "### For the Selected Lance"]
     render_cited_paragraphs(lines, lance_items[:3], report_sources)
-    lines += ["", "### For the IT Consulting Firm"]
+    lines += ["", "### For the Company"]
     render_cited_paragraphs(lines, firm_items[:3], report_sources)
 
     lines += ["", "## Trending Technologies"]

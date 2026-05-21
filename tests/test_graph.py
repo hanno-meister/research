@@ -2594,7 +2594,7 @@ def test_final_report_top_sections_render_markdown_source_links(monkeypatch):
     assert "Summary claim two. Source: [Source two](https://example.com/two)" in report
     assert "### For the Selected Lance" in report
     assert "Lance-specific why it matters. Source: [Source two](https://example.com/two)" in report
-    assert "### For the IT Consulting Firm" in report
+    assert "### For the Company" in report
     assert "Firm-wide why it matters. Source: [Source three](https://example.com/three)" in report
     assert "### Trend bullet" in report
     assert "Trend bullet. Sources: [Source one](https://example.com/one), [Source three](https://example.com/three)" in report
