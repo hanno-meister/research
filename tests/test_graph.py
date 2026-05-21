@@ -716,11 +716,11 @@ async def test_conduct_research_runs_one_worker_per_task(monkeypatch):
     second_payload, second_kwargs = agent.calls[1]
     assert "Find architecture docs" in first_payload["messages"][0].content
     assert first_kwargs["context"].task_id == "task-1"
-    assert first_kwargs["context"].focused_domains == ()
+    assert first_kwargs["context"].focused_domains == ("example.com",)
     assert first_kwargs["context"].default_query == "Find architecture docs What primitives exist?"
     assert "Find persistence docs" in second_payload["messages"][0].content
     assert second_kwargs["context"].task_id == "task-2"
-    assert second_kwargs["context"].focused_domains == ()
+    assert second_kwargs["context"].focused_domains == ("docs.example.com",)
     assert [finding["task_id"] for finding in update["research_findings"]] == [
         "task-1",
         "task-2",

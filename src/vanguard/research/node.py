@@ -111,7 +111,7 @@ async def _run_research_worker(
         recorder,
         default_query=_task_default_query(task, state, research_brief),
         default_highlight_query=_task_highlight_query(task, research_brief),
-        focused_domains=(),
+        focused_domains=task.focused_domains,
         task_id=task.id,
         search_budget=ResearchSearchBudget(
             max_search_calls=MAX_SEARCH_CALLS_PER_WORKER
