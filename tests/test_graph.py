@@ -540,7 +540,8 @@ def test_sanitized_tasks_filters_and_normalizes_domains():
         rationale="  why  ",
         boundaries=["  scope  "],
         key_questions=["  question  "],
-        focused_domains=["https://Example.com/article", "docs.example.com", "other.com"],
+        focused_domains=["https://Example.com/path/article", "docs.example.com", "other.com"],
+        depends_on=["1", "task-2", "task-1"],
         expected_output="  compact output  ",
         effort="medium",
     )
@@ -548,7 +549,8 @@ def test_sanitized_tasks_filters_and_normalizes_domains():
     sanitized = planning._sanitized_tasks([task], cast(AgentState, state), "brief")
 
     assert sanitized[0].id == "task-1"
-    assert sanitized[0].focused_domains == ["example.com", "docs.example.com"]
+    assert sanitized[0].focused_domains == ["example.com/path/", "docs.example.com"]
+    assert sanitized[0].depends_on == ["task-2"]
     assert sanitized[0].boundaries == ["scope"]
     assert sanitized[0].key_questions == ["question"]
     assert sanitized[0].expected_output == "compact output"
@@ -746,6 +748,40 @@ async def test_conduct_research_runs_workers_concurrently(monkeypatch):
         node.MAX_SEARCH_CALLS_PER_WORKER,
         node.MAX_SEARCH_CALLS_PER_WORKER,
     ]
+
+
+@pytest.mark.asyncio
+async def test_conduct_research_runs_dependent_workers_after_prerequisites(monkeypatch):
+    agent = ConcurrentFakeResearchAgent()
+
+    monkeypatch.setattr(node, "create_research_agent", lambda config, backend=None: agent)
+    runtime = SimpleNamespace(context=SimpleNamespace())
+
+    await research.conduct_research(
+        {
+            "research_intent": "search intent",
+            "research_brief": "focused research brief",
+            "research_tasks": [
+                {"id": "task-1", "objective": "Find systems"},
+                {"id": "task-2", "objective": "Find benchmarks"},
+                {"id": "task-3", "objective": "Synthesize recommendations", "depends_on": ["task-1", "task-2"]},
+            ],
+        },
+        runtime,
+    )
+
+    assert agent.max_active_calls == 2
+    assert [kwargs["context"].task_id for _, kwargs in agent.calls] == ["task-1", "task-2", "task-3"]
+
+
+def test_topological_task_batches_rejects_cycles():
+    with pytest.raises(ValueError, match="cycle"):
+        node._topological_task_batches(
+            [
+                node.ResearchWorkerTask(id="task-1", objective="A", depends_on=("task-2",)),
+                node.ResearchWorkerTask(id="task-2", objective="B", depends_on=("task-1",)),
+            ]
+        )
 
 
 @pytest.mark.asyncio

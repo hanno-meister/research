@@ -44,6 +44,10 @@ class ResearchTask(BaseModel):
         default_factory=list,
         description="Optional focus-domain hints. These do not override runtime policy.",
     )
+    depends_on: list[str] = Field(
+        default_factory=list,
+        description="Optional IDs of prerequisite tasks whose findings should be available before this task runs.",
+    )
     expected_output: str = Field(
         description="Compact description of the structured findings expected from the worker.",
     )

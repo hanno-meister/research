@@ -50,6 +50,8 @@ Rules:
 - Include source-quality expectations in expected_output when the question depends on recency, claims, forecasts, prices, market reaction, or disputed facts.
 - focused_domains are only optional focus hints. They must not broaden or override runtime constraints.
 - If allowed domains are provided, only include focused_domains from that allowed set.
+- Use depends_on when a task synthesizes, compares, or recommends based on evidence produced by other tasks; keep evidence-gathering tasks independent when possible.
+- If a final recommendation/synthesis task depends on earlier inventory, capability, or benchmark tasks, set depends_on to those task IDs instead of making it run in the first fan-out.
 - Do not invent hard date/domain constraints.
 - If runtime constraints are likely to limit coverage, keep tasks scoped to what can be supported and have workers surface limitations; do not create tasks that require unavailable domains.
 - expected_output should describe the compact structured findings the worker should return.

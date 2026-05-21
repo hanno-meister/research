@@ -13,7 +13,11 @@ from .langgraph_configuration import LangGraphConfig
 from .prompts import RESEARCH_PLAN_PROMPT
 from .state import AgentState
 from .utils.collections import clean_strings, unique_preserving_order
-from .utils.urls import normalize_domain, normalize_domains
+from .utils.urls import (
+    allowed_url_target_contains_target,
+    allowed_url_target_text,
+    normalize_allowed_url_target,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -91,7 +95,7 @@ def _sanitized_tasks(
     *,
     id_prefix: str = "task",
 ) -> list[ResearchTask]:
-    allowed_domains = normalize_domains(state.get("allowed_domains", []))
+    allowed_domains = _allowed_targets_from_state(state)
     sanitized = [
         _sanitize_task(task, index, allowed_domains, id_prefix=id_prefix)
         for index, task in enumerate(tasks, start=1)
@@ -121,13 +125,17 @@ def _sanitize_task(
 ) -> ResearchTask:
     focused_domains = tuple(
         unique_preserving_order(
-            normalize_domain(domain)
+            allowed_url_target_text(normalize_allowed_url_target(domain))
             for domain in task.focused_domains
             if domain and domain.strip()
         )
     )
     if allowed_domains:
-        focused_domains = tuple(domain for domain in focused_domains if domain in allowed_domains)
+        focused_domains = tuple(
+            _allowed_focus_target(domain, allowed_domains)
+            for domain in focused_domains
+            if _allowed_focus_target(domain, allowed_domains)
+        )
 
     return task.model_copy(
         update={
@@ -138,7 +146,45 @@ def _sanitize_task(
             "key_questions": clean_strings(task.key_questions),
             "target_terms": clean_strings(task.target_terms),
             "focused_domains": list(focused_domains),
+            "depends_on": _sanitize_depends_on(task.depends_on, index, id_prefix=id_prefix),
             "expected_output": task.expected_output.strip()
             or "Compact findings with source IDs and evidence paths.",
         }
     )
+
+
+def _allowed_targets_from_state(state: AgentState) -> tuple[str, ...]:
+    return tuple(
+        unique_preserving_order(
+            allowed_url_target_text(normalize_allowed_url_target(domain))
+            for domain in state.get("allowed_domains", [])
+            if isinstance(domain, str) and domain.strip()
+        )
+    )
+
+
+def _allowed_focus_target(focused_domain: str, allowed_domains: tuple[str, ...]) -> str:
+    focused_target = normalize_allowed_url_target(focused_domain)
+    for allowed_domain in allowed_domains:
+        allowed_target = normalize_allowed_url_target(allowed_domain)
+        if allowed_url_target_contains_target(allowed_target, focused_target):
+            return allowed_url_target_text(allowed_target)
+    return ""
+
+
+def _sanitize_depends_on(depends_on: list[str], index: int, *, id_prefix: str = "task") -> list[str]:
+    dependencies = []
+    for dependency in clean_strings(depends_on):
+        mapped = _planned_task_id(dependency, id_prefix=id_prefix)
+        if mapped and mapped != f"{id_prefix}-{index}":
+            dependencies.append(mapped)
+    return list(unique_preserving_order(dependencies))
+
+
+def _planned_task_id(value: str, *, id_prefix: str = "task") -> str:
+    stripped = value.strip()
+    if stripped.startswith(f"{id_prefix}-") and stripped.removeprefix(f"{id_prefix}-").isdigit():
+        return stripped
+    if stripped.isdigit():
+        return f"{id_prefix}-{stripped}"
+    return stripped
