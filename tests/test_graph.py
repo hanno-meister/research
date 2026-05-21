@@ -864,53 +864,26 @@ async def test_review_research_reads_only_known_evidence_without_persisting_cont
         }
     ]
     assert "content" not in update["evidence_read_records"][0]
+    assert update["review_round"] == 1
+    assert len(update["research_reviews"]) == 1
     assert update["research_reviews"][0]["evidence_read"] == update["evidence_read_records"]
-    assert update["research_reviews"][-1]["required_report_topics"] == ["Marble", "WorldScore"]
-    assert update["research_reviews"][-1]["coverage_gaps"] == ["Genie 3 not found in allowed sources"]
+    assert update["research_reviews"][0]["required_report_topics"] == ["Marble", "WorldScore"]
+    assert update["research_reviews"][0]["coverage_gaps"] == ["Genie 3 not found in allowed sources"]
 
 
 @pytest.mark.asyncio
-async def test_review_research_runs_bounded_follow_up_workers(monkeypatch, tmp_path):
+async def test_repair_research_runs_bounded_follow_up_workers(monkeypatch, tmp_path):
     agent = FakeResearchAgent()
-    fake_model = FakeReviewModel(
-        [
-            review.ResearchEvaluation(
-                sufficient=False,
-                coverage_assessment="Missing persistence coverage.",
-                follow_up_tasks=[
-                    planning.ResearchTask(
-                        id="follow-1",
-                        objective="Find persistence docs",
-                        rationale="Close coverage gap.",
-                        expected_output="Persistence finding.",
-                        effort="low",
-                    ),
-                    planning.ResearchTask(
-                        id="follow-2",
-                        objective="Find deployment docs",
-                        rationale="Extra task should be capped.",
-                        expected_output="Deployment finding.",
-                        effort="low",
-                    ),
-                ],
-            ),
-            review.ResearchEvaluation(
-                sufficient=True,
-                coverage_assessment="Follow-up closed the gap.",
-            ),
-        ]
-    )
-    monkeypatch.setattr(review_node, "ChatOpenAI", lambda **kwargs: fake_model)
     monkeypatch.setattr(review_followup, "create_research_agent", lambda config, backend=None: agent)
     monkeypatch.setattr(
         review_followup,
         "filesystem_backend_for_config",
         lambda _config: filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path)),
     )
-    monkeypatch.setattr(review_node, "MAX_FOLLOW_UP_WORKERS", 1)
-    monkeypatch.setattr(review_node, "MAX_FOLLOW_UP_SEARCHES", 1)
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_WORKERS", 1)
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_SEARCHES", 1)
 
-    update = await review.review_research(
+    update = await review.repair_research(
         {
             "research_intent": "intent",
             "research_brief": "brief",
@@ -920,6 +893,29 @@ async def test_review_research_runs_bounded_follow_up_workers(monkeypatch, tmp_p
             "research_findings": [],
             "research_sources": [],
             "evidence_artifacts": [],
+            "review_round": 1,
+            "research_reviews": [
+                {
+                    "round": 1,
+                    "sufficient": False,
+                    "follow_up_tasks": [
+                        planning.ResearchTask(
+                            id="follow-1",
+                            objective="Find persistence docs",
+                            rationale="Close coverage gap.",
+                            expected_output="Persistence finding.",
+                            effort="low",
+                        ).model_dump(),
+                        planning.ResearchTask(
+                            id="follow-2",
+                            objective="Find deployment docs",
+                            rationale="Extra task should be capped.",
+                            expected_output="Deployment finding.",
+                            effort="low",
+                        ).model_dump(),
+                    ],
+                }
+            ],
         },
         SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key")),
     )
@@ -938,9 +934,35 @@ async def test_review_research_runs_bounded_follow_up_workers(monkeypatch, tmp_p
             "summary": "Compact source summary.",
             "source_ids": ["S1"],
             "evidence_paths": ["/evidence/real-research.md"],
+            "produced_by": "repair_research:round-1",
+            "repair_task_id": "follow-up-1",
         }
     ]
-    assert len(update["research_reviews"]) == 2
+    assert "source_diversity_notes" not in update
+    assert update["repair_logs"][0]["tasks_run"] == ["follow-up-1"]
+    assert update["repair_logs"][0]["tasks_succeeded"] == ["follow-up-1"]
+    assert update["repair_logs"][0]["source_diversity_notes"] == ["Recorder-backed metadata only."]
+    assert update["repair_logs"][0]["produced_source_ids"] == ["S1"]
+    assert update["repair_logs"][0]["produced_finding_count"] == 1
+    assert update["research_sources"] == [
+        {
+            "provider": "exa",
+            "query": "search intent",
+            "url": "https://example.com/research",
+            "title": "Research source",
+            "summary": "Compact source summary.",
+            "raw_content_path": "/evidence/real-research.md",
+            "published_date": "2026-05-01",
+            "normalized_url": "https://example.com/research",
+            "canonical_domain": "example.com",
+            "source_type": "source",
+            "source_quality": "high",
+            "source_warnings": [],
+            "source_id": "S1",
+            "produced_by": "repair_research:round-1",
+            "repair_task_id": "follow-up-1",
+        }
+    ]
 
 
 @pytest.mark.asyncio

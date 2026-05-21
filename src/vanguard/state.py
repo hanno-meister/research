@@ -59,12 +59,17 @@ class AgentState(TypedDict):
         research_feasibility_notes: Append-only notes about source-policy constraints
             or impossible coverage under the current runtime policy.
         source_diversity_notes: Append-only notes about domain/source skew, duplicates,
-            weak source coverage, or follow-up source-diversity repairs.
+            or weak source coverage from initial research workers.
         research_reviews: Append-only structured review records, including sufficiency,
             source-quality assessment, evidence-read requests, follow-up tasks, and
             reviewer-selected report sources.
         evidence_read_records: Append-only metadata for evidence files selected and
             read during review/final reporting. Does not contain raw snippet content.
+        review_round: Number of review records produced so far. Used for graph-level
+            review/repair loop routing.
+        repair_logs: Append-only structured execution logs for review-requested
+            follow-up research repairs. Follow-up source caveats live here rather
+            than in top-level source_diversity_notes.
         search_provider_counts: Latest aggregate accepted-source counts by provider.
         search_domain_counts: Latest aggregate accepted-source counts by domain.
         final_report: Rendered Markdown final or incomplete report.
@@ -88,6 +93,8 @@ class AgentState(TypedDict):
     source_diversity_notes: NotRequired[Annotated[list[str], operator.add]]
     research_reviews: NotRequired[Annotated[list[dict[str, object]], operator.add]]
     evidence_read_records: NotRequired[Annotated[list[dict[str, str | int]], operator.add]]
+    review_round: NotRequired[int]
+    repair_logs: NotRequired[Annotated[list[dict[str, object]], operator.add]]
     search_provider_counts: NotRequired[dict[str, int]]
     search_domain_counts: NotRequired[dict[str, int]]
     final_report: NotRequired[str]

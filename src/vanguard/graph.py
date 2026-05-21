@@ -10,7 +10,8 @@ from .brief import write_research_brief
 from .langgraph_configuration import LangGraphConfig
 from .planning import plan_research
 from .report_generation import final_report_generation
-from .review import review_research
+from .review import repair_research, review_research
+from .review.defaults import MAX_REVIEW_ROUNDS
 from .research import conduct_research
 from .state import AgentInputState, AgentState
 
@@ -49,6 +50,17 @@ def _with_state_logging(name: str, node: Callable[..., Any]) -> Callable[..., An
 
     return wrapped
 
+
+def _route_after_review(state: AgentState) -> str:
+    reviews = [review for review in state.get("research_reviews", []) or [] if isinstance(review, dict)]
+    latest_review = reviews[-1] if reviews else {}
+    review_round = int(state.get("review_round", len(reviews)) or len(reviews))
+    follow_up_tasks = latest_review.get("follow_up_tasks", [])
+    has_follow_up_tasks = isinstance(follow_up_tasks, list) and bool(follow_up_tasks)
+    if latest_review.get("sufficient") is False and review_round < MAX_REVIEW_ROUNDS and has_follow_up_tasks:
+        return "repair_research"
+    return "final_report_generation"
+
 builder = StateGraph(
     AgentState,
     context_schema=LangGraphConfig,
@@ -58,13 +70,23 @@ builder.add_node("write_research_brief", _with_state_logging("write_research_bri
 builder.add_node("plan_research", _with_state_logging("plan_research", plan_research))
 builder.add_node("conduct_research", _with_state_logging("conduct_research", conduct_research))
 builder.add_node("review_research", _with_state_logging("review_research", review_research))
+builder.add_node("repair_research", _with_state_logging("repair_research", repair_research))
 builder.add_node("final_report_generation", _with_state_logging("final_report_generation", final_report_generation))
 
 builder.add_edge(START, "write_research_brief")
 builder.add_edge("write_research_brief", "plan_research")
 builder.add_edge("plan_research", "conduct_research")
 builder.add_edge("conduct_research", "review_research")
-builder.add_edge("review_research", "final_report_generation")
+builder.add_conditional_edges(
+    "review_research",
+    _route_after_review,
+    {
+        "repair_research": "repair_research",
+        "final_report_generation": "final_report_generation",
+    },
+)
+builder.add_edge("repair_research", "review_research")
+# TODO: The graph is never shown as complete 
 builder.add_edge("final_report_generation", END)
 
 async def main():

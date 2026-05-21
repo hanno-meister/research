@@ -17,12 +17,9 @@ from vanguard.state import AgentState
 
 from .defaults import (
     MAX_EVIDENCE_READS,
-    MAX_FOLLOW_UP_SEARCHES,
-    MAX_FOLLOW_UP_WORKERS,
     MAX_REVIEW_ROUNDS,
 )
 from .evidence import read_selected_evidence
-from .followup import follow_up_worker_tasks, run_follow_up_workers
 from .models import EvidenceReadRequest, ResearchEvaluation
 from .prompts import REVIEW_RESEARCH_PROMPT
 
@@ -31,164 +28,91 @@ logger = logging.getLogger(__name__)
 
 
 async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
-    """Evaluate research quality and run bounded targeted follow-up if needed."""
+    """Evaluate research quality once and append a pure review record."""
 
     if not state.get("research_brief"):
         raise ValueError("Missing research_brief. Did write_research_brief run?")
 
     model = _review_model(runtime.context)
     backend = filesystem_backend_for_config(runtime.context)
-    reviews: list[dict[str, object]] = []
-    evidence_read_records: list[dict[str, str | int]] = []
     evidence_snippets: list[dict[str, str | int]] = []
-    aggregate_update = _empty_update()
-    workers_used = 0
-    searches_used = 0
-    evidence_reads_used = 0
-    current_state: AgentState = dict(state)  # type: ignore[assignment]
+    round_number = int(state.get("review_round", 0) or 0) + 1
     logger.info(
         "Starting research review",
         extra={
+            "round": round_number,
             "finding_count": len(state.get("research_findings", []) or []),
             "source_count": len(state.get("research_sources", []) or []),
             "evidence_artifact_count": len(state.get("evidence_artifacts", []) or []),
             "max_review_rounds": MAX_REVIEW_ROUNDS,
-            "max_follow_up_workers": MAX_FOLLOW_UP_WORKERS,
-            "max_follow_up_searches": MAX_FOLLOW_UP_SEARCHES,
             "max_evidence_reads": MAX_EVIDENCE_READS,
         },
     )
 
-    for round_number in range(1, MAX_REVIEW_ROUNDS + 1):
-        logger.info(
-            "Starting review round",
-            extra={
-                "round": round_number,
-                "finding_count": len(current_state.get("research_findings", []) or []),
-                "source_count": len(current_state.get("research_sources", []) or []),
-                "evidence_snippet_count": len(evidence_snippets),
-            },
-        )
+    evaluation = await _evaluate(
+        model,
+        state,
+        round_number=round_number,
+        evidence_snippets=evidence_snippets,
+    )
+    requested_evidence = list(evaluation.evidence_to_read)
+
+    logger.info(
+        "Reading review-selected evidence",
+        extra={
+            "round": round_number,
+            "requested_count": len(requested_evidence),
+            "remaining_reads": MAX_EVIDENCE_READS,
+        },
+    )
+    round_reads, read_records = read_selected_evidence(
+        state,
+        evaluation.evidence_to_read,
+        remaining_reads=MAX_EVIDENCE_READS,
+        backend=backend,
+    )
+    evidence_snippets.extend(round_reads)
+    logger.info(
+        "Review evidence reads completed",
+        extra={
+            "round": round_number,
+            "read_count": len(round_reads),
+            "total_characters": sum(
+                int(read.get("content_characters", 0)) for read in round_reads
+            ),
+        },
+    )
+
+    if round_reads:
+        logger.info("Re-evaluating research after evidence reads", extra={"round": round_number})
         evaluation = await _evaluate(
             model,
-            current_state,
+            state,
             round_number=round_number,
             evidence_snippets=evidence_snippets,
         )
-        requested_evidence = list(evaluation.evidence_to_read)
 
-        logger.info(
-            "Reading review-selected evidence",
-            extra={
-                "round": round_number,
-                "requested_count": len(requested_evidence),
-                "remaining_reads": MAX_EVIDENCE_READS - evidence_reads_used,
-            },
-        )
-        round_reads, read_records = read_selected_evidence(
-            current_state,
-            evaluation.evidence_to_read,
-            remaining_reads=MAX_EVIDENCE_READS - evidence_reads_used,
-            backend=backend,
-        )
-        evidence_reads_used += len(round_reads)
-        evidence_snippets.extend(round_reads)
-        evidence_read_records.extend(read_records)
-        logger.info(
-            "Review evidence reads completed",
-            extra={
-                "round": round_number,
-                "read_count": len(round_reads),
-                "total_characters": sum(
-                    int(read.get("content_characters", 0)) for read in round_reads
-                ),
-            },
-        )
-
-        if round_reads:
-            logger.info("Re-evaluating research after evidence reads", extra={"round": round_number})
-            evaluation = await _evaluate(
-                model,
-                current_state,
-                round_number=round_number,
-                evidence_snippets=evidence_snippets,
-            )
-
-        reviews.append(
-            _review_record(
-                round_number,
-                evaluation,
-                read_records,
-                evidence_requested=requested_evidence,
-            )
-        )
-        if evaluation.sufficient:
-            break
-
-        remaining_workers = MAX_FOLLOW_UP_WORKERS - workers_used
-        remaining_searches = MAX_FOLLOW_UP_SEARCHES - searches_used
-        searches_per_worker = max(1, remaining_searches)
-        follow_up_tasks = follow_up_worker_tasks(
-            evaluation.follow_up_tasks,
-            current_state,
-            remaining_workers=remaining_workers,
-            remaining_workers_by_search_budget=remaining_searches // searches_per_worker,
-        )
-        if not follow_up_tasks:
-            logger.info(
-                "No follow-up workers scheduled",
-                extra={
-                    "round": round_number,
-                    "proposed_follow_up_count": len(evaluation.follow_up_tasks),
-                    "remaining_workers": remaining_workers,
-                    "remaining_searches": remaining_searches,
-                },
-            )
-            break
-
-        follow_up_start = perf_counter()
-        logger.info(
-            "Starting follow-up research workers",
-            extra={
-                "round": round_number,
-                "worker_count": len(follow_up_tasks),
-                "searches_per_worker": searches_per_worker,
-            },
-        )
-        follow_up_update, search_budget_used = await run_follow_up_workers(
-            current_state,
-            runtime,
-            follow_up_tasks,
-            max_search_calls_per_worker=searches_per_worker,
-        )
-        workers_used += len(follow_up_tasks)
-        searches_used += search_budget_used
-        logger.info(
-            "Follow-up research workers completed",
-            extra={
-                "round": round_number,
-                "worker_count": len(follow_up_tasks),
-                "duration_seconds": round(perf_counter() - follow_up_start, 3),
-                "finding_count": len(follow_up_update.get("research_findings", []) or []),
-                "source_count": len(follow_up_update.get("research_sources", []) or []),
-                "search_budget_used": search_budget_used,
-            },
-        )
-        _merge_update(aggregate_update, follow_up_update)
-        current_state = _state_with_update(current_state, follow_up_update)
-
-    aggregate_update["research_reviews"] = reviews
-    aggregate_update["evidence_read_records"] = evidence_read_records
+    review_record = _review_record(
+        round_number,
+        evaluation,
+        read_records,
+        evidence_requested=requested_evidence,
+    )
+    update = {
+        "research_reviews": [review_record],
+        "evidence_read_records": read_records,
+        "review_round": round_number,
+    }
     logger.info(
         "Research review completed",
         extra={
-            "review_round_count": len(reviews),
-            "evidence_read_count": len(evidence_read_records),
-            "follow_up_workers_used": workers_used,
-            "follow_up_search_budget_used": searches_used,
+            "round": round_number,
+            "sufficient": evaluation.sufficient,
+            "evidence_read_count": len(read_records),
+            "follow_up_task_count": len(evaluation.follow_up_tasks),
         },
     )
-    return aggregate_update
+    return update
 
 
 def _review_model(config: LangGraphConfig):
@@ -285,41 +209,3 @@ def _review_record(
         ],
         "follow_up_tasks": [task.model_dump() for task in evaluation.follow_up_tasks],
     }
-
-
-def _empty_update() -> dict[str, Any]:
-    return {
-        "research_findings": [],
-        "research_sources": [],
-        "evidence_artifacts": [],
-        "source_diversity_notes": [],
-    }
-
-
-def _merge_update(target: dict[str, Any], update: dict[str, Any]) -> None:
-    for key in (
-        "research_findings",
-        "research_sources",
-        "evidence_artifacts",
-        "source_diversity_notes",
-    ):
-        target[key].extend(update.get(key, []))
-    if "search_provider_counts" in update:
-        target["search_provider_counts"] = update["search_provider_counts"]
-    if "search_domain_counts" in update:
-        target["search_domain_counts"] = update["search_domain_counts"]
-
-
-def _state_with_update(state: AgentState, update: dict[str, Any]) -> AgentState:
-    merged: dict[str, Any] = dict(state)
-    for key in (
-        "research_findings",
-        "research_sources",
-        "evidence_artifacts",
-        "source_diversity_notes",
-    ):
-        merged[key] = list(merged.get(key, [])) + list(update.get(key, []))
-    for key in ("search_provider_counts", "search_domain_counts"):
-        if update.get(key):
-            merged[key] = update[key]
-    return merged  # type: ignore[return-value]
