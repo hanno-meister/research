@@ -70,6 +70,8 @@ class AgentState(TypedDict):
         repair_logs: Append-only structured execution logs for review-requested
             follow-up research repairs. Follow-up source caveats live here rather
             than in top-level source_diversity_notes.
+        report_bundle: Deterministic writer input assembled from the latest
+            review and research log. Replaced as a whole, not appended.
         search_provider_counts: Latest aggregate accepted-source counts by provider.
         search_domain_counts: Latest aggregate accepted-source counts by domain.
         final_report: Rendered Markdown final or incomplete report.
@@ -95,6 +97,7 @@ class AgentState(TypedDict):
     evidence_read_records: NotRequired[Annotated[list[dict[str, str | int]], operator.add]]
     review_round: NotRequired[int]
     repair_logs: NotRequired[Annotated[list[dict[str, object]], operator.add]]
+    report_bundle: NotRequired[dict[str, object]]
     search_provider_counts: NotRequired[dict[str, int]]
     search_domain_counts: NotRequired[dict[str, int]]
     final_report: NotRequired[str]

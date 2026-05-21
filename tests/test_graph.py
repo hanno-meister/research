@@ -11,7 +11,7 @@ from vanguard import research
 from vanguard import planning
 from vanguard import review
 from vanguard.prompts import RESEARCH_PLAN_PROMPT
-from vanguard.report_generation import final_report_generation
+from vanguard.report_generation import build_report_bundle, final_report_generation
 from vanguard.review import followup as review_followup
 from vanguard.review import node as review_node
 from vanguard.research import policy
@@ -23,6 +23,13 @@ from vanguard.research.search_gateway_models import (
     SearchPolicy,
 )
 from vanguard.state import AgentState
+
+
+def report_state(state: dict) -> AgentState:
+    typed_state = cast(AgentState, state)
+    if "report_bundle" in typed_state or not typed_state.get("research_reviews"):
+        return typed_state
+    return cast(AgentState, {**typed_state, "report_bundle": build_report_bundle(typed_state)["report_bundle"]})
 
 
 class FakeSearchGateway:
@@ -1037,7 +1044,7 @@ def test_follow_up_worker_tasks_treats_focused_domains_as_hints():
 
 
 def test_final_report_filters_caveats_and_promotes_follow_up_findings():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_tasks": [
@@ -1086,7 +1093,7 @@ def test_final_report_filters_caveats_and_promotes_follow_up_findings():
             ],
             "source_diversity_notes": ["task-1: mostly official docs"],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert report.startswith("# Trend Report: World Generation Models for Spatial Computing")
@@ -1106,7 +1113,7 @@ def test_final_report_filters_caveats_and_promotes_follow_up_findings():
 
 
 def test_final_report_gracefully_handles_missing_review():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1118,7 +1125,7 @@ def test_final_report_gracefully_handles_missing_review():
                 }
             ],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "# Research Incomplete" in report
@@ -1128,7 +1135,7 @@ def test_final_report_gracefully_handles_missing_review():
 
 
 def test_incomplete_report_is_concise_public_and_omits_evidence_paths():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_tasks": [{"id": "task-1", "objective": "Initial"}],
@@ -1160,7 +1167,7 @@ def test_incomplete_report_is_concise_public_and_omits_evidence_paths():
             "research_sources": [{"source_id": "S1", "title": "Source", "canonical_domain": "example.com"}],
             "evidence_artifacts": [{"source_id": "S1", "path": "/evidence/source.md"}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert report.startswith("# Research Incomplete")
@@ -1173,8 +1180,90 @@ def test_incomplete_report_is_concise_public_and_omits_evidence_paths():
     assert "/evidence/" not in report
 
 
+def test_build_report_bundle_filters_and_validates_selected_items():
+    update = build_report_bundle(
+        cast(
+            AgentState,
+            {
+                "research_findings": [
+                    {"summary": "Primary supported claim", "source_ids": ["S1", "S2"]},
+                    {"summary": "Excluded claim", "source_ids": ["S3"]},
+                    {"summary": "Dangling claim", "source_ids": ["S9"]},
+                ],
+                "research_sources": [
+                    {"source_id": "S1", "title": "Primary", "url": "https://example.com/1"},
+                    {"source_id": "S2", "title": "Caution", "url": "https://example.com/2"},
+                    {"source_id": "S3", "title": "Excluded", "url": "https://example.com/3"},
+                ],
+                "research_reviews": [
+                    {
+                        "sufficient": True,
+                        "selected_report_sources": [
+                            {"source_id": "S1", "status": "use", "reason": "primary"},
+                            {"source_id": "S2", "status": "caution", "reason": "weak"},
+                            {"source_id": "S3", "status": "exclude", "reason": "bad"},
+                        ],
+                        "selected_report_findings": [
+                            {"finding_id": "F1", "status": "use", "reason": "ok"},
+                            {"finding_id": "F2", "status": "exclude", "reason": "bad"},
+                            {"finding_id": "F3", "status": "use", "reason": "dangling"},
+                        ],
+                    }
+                ],
+            },
+        )
+    )
+
+    bundle = update["report_bundle"]
+    assert [source["source_id"] for source in bundle["sources"]] == ["S1", "S2"]
+    assert [finding["finding_id"] for finding in bundle["findings"]] == ["F1"]
+    assert bundle["findings"][0]["citation_source_ids"] == ["S1", "S2"]
+    assert any(caveat["type"] == "dropped_finding_without_kept_citations" for caveat in bundle["methodology_caveats"])
+
+
+def test_build_report_bundle_demotes_missing_evidence_reads_and_keeps_repair_caveats():
+    update = build_report_bundle(
+        cast(
+            AgentState,
+            {
+                "review_round": 2,
+                "research_findings": [
+                    {
+                        "summary": "Repair claim about topic alpha",
+                        "source_ids": ["S1"],
+                        "produced_by": "repair_research:round-1",
+                        "repair_task_id": "follow-up-1",
+                    }
+                ],
+                "research_sources": [{"source_id": "S1", "title": "Only source", "url": "https://example.com/1"}],
+                "evidence_read_records": [],
+                "repair_logs": [{"round": 1, "source_diversity_notes": ["Follow-up surfaced only vendor sources."]}],
+                "research_reviews": [
+                    {
+                        "sufficient": True,
+                        "required_report_topics": ["topic alpha"],
+                        "evidence_to_read": [{"source_id": "S1", "reason": "verify"}],
+                        "selected_report_sources": [{"source_id": "S1", "status": "use", "reason": "ok"}],
+                        "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "ok"}],
+                    }
+                ],
+            },
+        )
+    )
+
+    bundle = update["report_bundle"]
+    assert bundle["findings"][0]["status"] == "caution"
+    assert bundle["findings"][0]["provenance"] == {
+        "produced_by": "repair_research:round-1",
+        "repair_task_id": "follow-up-1",
+    }
+    caveat_types = {caveat["type"] for caveat in bundle["methodology_caveats"]}
+    assert "missing_evidence_read" in caveat_types
+    assert "repair_source_diversity" in caveat_types
+
+
 def test_insufficient_review_with_usable_evidence_renders_partial_report():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1194,7 +1283,7 @@ def test_insufficient_review_with_usable_evidence_renders_partial_report():
                 }
             ],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert update["report_status"] == "partial"
@@ -1206,7 +1295,7 @@ def test_insufficient_review_with_usable_evidence_renders_partial_report():
 
 
 def test_core_unanswerable_review_stays_incomplete_even_with_evidence():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [{"summary": "Some finding.", "source_ids": ["S1"]}],
@@ -1219,21 +1308,21 @@ def test_core_unanswerable_review_stays_incomplete_even_with_evidence():
                 }
             ],
         }
-    )
+    ))
 
     assert update["report_status"] == "incomplete"
     assert update["final_report"].startswith("# Research Incomplete")
 
 
 def test_required_topics_alone_do_not_create_partial_report():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [],
             "research_sources": [],
             "research_reviews": [{"sufficient": False, "required_report_topics": ["Topic"]}],
         }
-    )
+    ))
 
     assert update["report_status"] == "incomplete"
     assert update["final_report"].startswith("# Research Incomplete")
@@ -1247,7 +1336,7 @@ def test_prompts_include_general_source_quality_invariants():
 
 
 def test_final_report_filters_review_caveats_without_source_id_substring_matches():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_tasks": [{"id": "task-1", "objective": "Initial"}],
@@ -1291,7 +1380,7 @@ def test_final_report_filters_review_caveats_without_source_id_substring_matches
             ],
             "source_diversity_notes": ["follow-up task-7: targeted repair"],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "Stable S1-backed finding." in report
@@ -1303,7 +1392,7 @@ def test_final_report_filters_review_caveats_without_source_id_substring_matches
 
 
 def test_final_report_caveat_takes_precedence_over_follow_up_section():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_tasks": [{"id": "task-1", "objective": "Initial"}],
@@ -1324,7 +1413,7 @@ def test_final_report_caveat_takes_precedence_over_follow_up_section():
             ],
             "source_diversity_notes": ["follow-up task-7: targeted repair"],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "## Corrections and Updates" not in report
@@ -1333,7 +1422,7 @@ def test_final_report_caveat_takes_precedence_over_follow_up_section():
 
 
 def test_final_report_ignores_colliding_follow_up_diversity_note_task_ids():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_tasks": [{"id": "task-1", "objective": "Initial"}],
@@ -1359,7 +1448,7 @@ def test_final_report_ignores_colliding_follow_up_diversity_note_task_ids():
                 "follow-up task-1: colliding note should not promote originals"
             ],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "## Corrections and Updates" not in report
@@ -1368,7 +1457,7 @@ def test_final_report_ignores_colliding_follow_up_diversity_note_task_ids():
 
 
 def test_final_report_preserves_finding_order_without_heuristic_text_filtering():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "Find recent Nvidia news",
             "research_tasks": [{"id": "task-1", "objective": "Recent Nvidia news"}],
@@ -1418,7 +1507,7 @@ def test_final_report_preserves_finding_order_without_heuristic_text_filtering()
             "research_reviews": [{"sufficient": True}],
             "search_provider_counts": {"exa": 1, "tavily": 2},
         }
-    )
+    ))
 
     report = update["final_report"]
     assert report.startswith("# Trend Report: World Generation Models for Spatial Computing")
@@ -1438,7 +1527,7 @@ def test_final_report_preserves_finding_order_without_heuristic_text_filtering()
 
 
 def test_final_report_keeps_overlapping_findings_and_uses_public_citations():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "Research product launch",
             "research_findings": [
@@ -1466,7 +1555,7 @@ def test_final_report_keeps_overlapping_findings_and_uses_public_citations():
             ],
             "research_reviews": [{"sufficient": True}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert report.startswith("# Trend Report: World Generation Models for Spatial Computing")
@@ -1480,7 +1569,7 @@ def test_final_report_keeps_overlapping_findings_and_uses_public_citations():
 
 
 def test_final_report_key_takeaways_populate_when_draft_is_empty():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1493,7 +1582,7 @@ def test_final_report_key_takeaways_populate_when_draft_is_empty():
             ],
             "research_reviews": [{"sufficient": True}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "## Summary" in report
@@ -1502,7 +1591,7 @@ def test_final_report_key_takeaways_populate_when_draft_is_empty():
 
 
 def test_final_report_selected_sources_are_numbered_and_uncapped():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1515,7 +1604,7 @@ def test_final_report_selected_sources_are_numbered_and_uncapped():
             ],
             "research_reviews": [{"sufficient": True}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "[17]" not in report
@@ -1523,7 +1612,7 @@ def test_final_report_selected_sources_are_numbered_and_uncapped():
 
 
 def test_final_report_respects_selected_report_sources_policy():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1548,7 +1637,7 @@ def test_final_report_respects_selected_report_sources_policy():
                 }
             ],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "Useable claim from source one." in report
@@ -1561,7 +1650,7 @@ def test_final_report_respects_selected_report_sources_policy():
 
 
 def test_final_report_contiguous_source_numbering_skips_unused_and_excluded_sources():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1584,7 +1673,7 @@ def test_final_report_contiguous_source_numbering_skips_unused_and_excluded_sour
                 }
             ],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "One (example.com)" in report
@@ -1596,7 +1685,7 @@ def test_final_report_contiguous_source_numbering_skips_unused_and_excluded_sour
 
 
 def test_final_report_uses_finding_selection_and_only_cited_sources_in_sources_list():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1616,7 +1705,7 @@ def test_final_report_uses_finding_selection_and_only_cited_sources_in_sources_l
                 }
             ],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "Old stale finding." not in report
@@ -1625,7 +1714,7 @@ def test_final_report_uses_finding_selection_and_only_cited_sources_in_sources_l
 
 
 def test_final_report_backwards_compatibility_without_selected_report_findings():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1636,7 +1725,7 @@ def test_final_report_backwards_compatibility_without_selected_report_findings()
             ],
             "research_reviews": [{"sufficient": True, "selected_report_sources": [{"source_id": "S1", "status": "use", "reason": "ok"}]}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "Compat finding." in report
@@ -1644,7 +1733,7 @@ def test_final_report_backwards_compatibility_without_selected_report_findings()
 
 
 def test_final_report_sources_render_clickable_links():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1661,7 +1750,7 @@ def test_final_report_sources_render_clickable_links():
             ],
             "research_reviews": [{"sufficient": True}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "[1]" not in report
@@ -1707,7 +1796,7 @@ def test_final_report_top_sections_render_direct_source_urls(monkeypatch):
         ),
     )
 
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1724,7 +1813,7 @@ def test_final_report_top_sections_render_direct_source_urls(monkeypatch):
                 {"source_id": "S3", "status": "use", "reason": "ok"},
             ]}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "Summary claim one. Sources: https://example.com/one, https://example.com/two, https://example.com/three" in report
@@ -1755,7 +1844,7 @@ def test_final_report_caps_urls_per_claim_and_keeps_sources_list_uncapped(monkey
             ),
         ),
     )
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1768,7 +1857,7 @@ def test_final_report_caps_urls_per_claim_and_keeps_sources_list_uncapped(monkey
             ],
             "research_reviews": [{"sufficient": True}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "Many-source claim. Sources: https://example.com/1, https://example.com/2, https://example.com/3" in report
@@ -1777,7 +1866,7 @@ def test_final_report_caps_urls_per_claim_and_keeps_sources_list_uncapped(monkey
 
 
 def test_final_report_body_uses_direct_source_urls_not_numeric_citations():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1789,7 +1878,7 @@ def test_final_report_body_uses_direct_source_urls_not_numeric_citations():
             ],
             "research_reviews": [{"sufficient": True}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert re.search(r"\[\d+\]", report) is None
@@ -1818,7 +1907,7 @@ def test_final_report_uses_prose_first_rendering_for_analysis_sections(monkeypat
             ),
         ),
     )
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1838,7 +1927,7 @@ def test_final_report_uses_prose_first_rendering_for_analysis_sections(monkeypat
             ],
             "source_diversity_notes": ["Most sources come from one domain."],
         }
-    )
+    ))
 
     report = update["final_report"]
     trending = report.split("## Trending Technologies", 1)[1].split("## Team Suggestions", 1)[0]
@@ -1849,14 +1938,15 @@ def test_final_report_uses_prose_first_rendering_for_analysis_sections(monkeypat
     assert "### Technology Beta remains earlier-stage" in trending
     assert "\n- Technology Alpha" not in trending
     assert "\n- Technology Beta" not in trending
-    assert "Primary coverage is good. Benchmark coverage is thin. Most sources come from one domain." in confidence
+    assert "Primary coverage is good. Benchmark coverage is thin." in confidence
+    assert "Most sources come from one domain." not in confidence
     assert "\n- Primary coverage" not in confidence
     assert "## Selected Sources" in report
     assert "- 1. [Alpha source](https://example.com/alpha)" in report
 
 
 def test_final_report_marble_claim_uses_marble_and_worldact_urls_only():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1869,7 +1959,7 @@ def test_final_report_marble_claim_uses_marble_and_worldact_urls_only():
             ],
             "research_reviews": [{"sufficient": True}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert "https://marble.example/docs" in report
@@ -1878,7 +1968,7 @@ def test_final_report_marble_claim_uses_marble_and_worldact_urls_only():
 
 
 def test_final_report_sanitizes_internal_source_ids_from_body_text():
-    update = final_report_generation(
+    update = final_report_generation(report_state(
         {
             "research_intent": "intent",
             "research_findings": [
@@ -1889,7 +1979,7 @@ def test_final_report_sanitizes_internal_source_ids_from_body_text():
             ],
             "research_reviews": [{"sufficient": True}],
         }
-    )
+    ))
 
     report = update["final_report"]
     assert re.search(r"\bS\d+\b", report) is None

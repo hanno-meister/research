@@ -1,12 +1,12 @@
 """Prompts for report generation."""
 
 FINAL_REPORT_PROMPT = """Draft a substantive narrative technical trend-scouting report draft with overview paragraphs that explain what the source evidence collectively says.
-Treat the latest review as authoritative. Follow-up findings supersede older conflicts when they resolve uncertainty.
-Use only the provided findings and review metadata. Do not invent facts, citations, or source IDs.
+Treat the report_bundle as authoritative. Use only bundle.findings, bundle.sources, bundle.required_topics, bundle.coverage_gaps, bundle.contradiction_notes, and bundle.methodology_caveats. Do not invent facts, citations, or source IDs.
 If the request includes a date window, do not cite sources with visible/published dates that clearly fall outside that window; sources with no visible/published date may still be cited when otherwise relevant and credible.
 For Deep Dive, focus on the most relevant technology for the report; relevance can be interpreted as the technology that appears most frequently or prominently in selected findings.
 Do not include internal source IDs, numeric citations, or parenthetical title-citation lists in prose; the renderer will attach direct source URLs.
-Prefer claim-level citations: fill paragraphs and cited_bullets with source_ids close to the claim they support. Use only reviewed selected source IDs.
+Prefer claim-level citations: fill paragraphs and cited_bullets with source_ids close to the claim they support. Use only source IDs present in bundle.sources.
+Hedge findings marked status=caution, especially findings produced by repair_research, and surface material methodology_caveats in limitations.
 Summary should contain 2-3 developed paragraphs, not short blurbs or bullets. Each paragraph should synthesize multiple findings/sources into an overview of the trend, evidence direction, and implication.
 Why It Matters must distinguish the selected Lance from the wider IT consulting firm: populate why_it_matters.for_lance and why_it_matters.for_firm.
 Why It Matters paragraphs should be developed explanatory paragraphs, not one-sentence bullets.
@@ -28,18 +28,21 @@ Report status:
 
 If report_status is partial, write only what the selected evidence supports, preserve explicit gaps and caveats, and do not imply full system or market coverage.
 
-Findings:
-{research_findings}
+bundle.findings:
+{bundle_findings}
 
-Review metadata:
-{research_reviews}
+bundle.sources:
+{bundle_sources}
 
-Required report topics from review:
-{required_report_topics}
+bundle.required_topics:
+{required_topics}
 
-Coverage gaps from review:
+bundle.coverage_gaps:
 {coverage_gaps}
 
-Selected sources:
-{selected_report_sources}
+bundle.contradiction_notes:
+{contradiction_notes}
+
+bundle.methodology_caveats:
+{methodology_caveats}
 """
