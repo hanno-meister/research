@@ -1221,6 +1221,176 @@ def test_build_report_bundle_filters_and_validates_selected_items():
     assert any(caveat["type"] == "dropped_finding_without_kept_citations" for caveat in bundle["methodology_caveats"])
 
 
+def test_build_report_bundle_prunes_excluded_finding_citations_with_caveat():
+    update = build_report_bundle(
+        cast(
+            AgentState,
+            {
+                "research_findings": [
+                    {"summary": "Mixed support claim", "source_ids": ["S1", "S2", "S3"]},
+                ],
+                "research_sources": [
+                    {"source_id": "S1", "title": "Use", "url": "https://example.com/1"},
+                    {"source_id": "S2", "title": "Caution", "url": "https://example.com/2"},
+                    {"source_id": "S3", "title": "Excluded", "url": "https://example.com/3"},
+                ],
+                "research_reviews": [
+                    {
+                        "sufficient": True,
+                        "selected_report_sources": [
+                            {"source_id": "S1", "status": "use", "reason": "primary"},
+                            {"source_id": "S2", "status": "caution", "reason": "weak"},
+                            {"source_id": "S3", "status": "exclude", "reason": "duplicate"},
+                        ],
+                        "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "ok"}],
+                    }
+                ],
+            },
+        )
+    )
+
+    bundle = update["report_bundle"]
+    assert [finding["finding_id"] for finding in bundle["findings"]] == ["F1"]
+    assert bundle["findings"][0]["citation_source_ids"] == ["S1", "S2"]
+    assert {
+        "type": "pruned_finding_citations",
+        "finding_id": "F1",
+        "pruned_source_ids": ["S3"],
+    } in bundle["methodology_caveats"]
+
+
+def test_build_report_bundle_drops_finding_with_only_excluded_citations():
+    update = build_report_bundle(
+        cast(
+            AgentState,
+            {
+                "research_findings": [
+                    {"summary": "Unsupported after exclusion", "source_ids": ["S1", "S2"]},
+                ],
+                "research_sources": [
+                    {"source_id": "S1", "title": "Excluded 1", "url": "https://example.com/1"},
+                    {"source_id": "S2", "title": "Excluded 2", "url": "https://example.com/2"},
+                ],
+                "research_reviews": [
+                    {
+                        "sufficient": True,
+                        "selected_report_sources": [
+                            {"source_id": "S1", "status": "exclude", "reason": "duplicate"},
+                            {"source_id": "S2", "status": "exclude", "reason": "duplicate"},
+                        ],
+                        "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "ok"}],
+                    }
+                ],
+            },
+        )
+    )
+
+    bundle = update["report_bundle"]
+    assert bundle["findings"] == []
+    assert any(caveat["type"] == "dropped_finding_without_kept_citations" for caveat in bundle["methodology_caveats"])
+
+
+def test_build_report_bundle_keeps_use_citations_unchanged_without_pruning_caveat():
+    update = build_report_bundle(
+        cast(
+            AgentState,
+            {
+                "research_findings": [
+                    {"summary": "Fully supported claim", "source_ids": ["S1", "S2"]},
+                ],
+                "research_sources": [
+                    {"source_id": "S1", "title": "Use 1", "url": "https://example.com/1"},
+                    {"source_id": "S2", "title": "Use 2", "url": "https://example.com/2"},
+                ],
+                "research_reviews": [
+                    {
+                        "sufficient": True,
+                        "selected_report_sources": [
+                            {"source_id": "S1", "status": "use", "reason": "primary"},
+                            {"source_id": "S2", "status": "use", "reason": "primary"},
+                        ],
+                        "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "ok"}],
+                    }
+                ],
+            },
+        )
+    )
+
+    bundle = update["report_bundle"]
+    assert [finding["finding_id"] for finding in bundle["findings"]] == ["F1"]
+    assert bundle["findings"][0]["citation_source_ids"] == ["S1", "S2"]
+    assert not any(caveat["type"] == "pruned_finding_citations" for caveat in bundle["methodology_caveats"])
+
+
+def test_build_report_bundle_prunes_banned_finding_citations_with_caveat():
+    update = build_report_bundle(
+        cast(
+            AgentState,
+            {
+                "research_findings": [
+                    {"summary": "Mixed banned support claim", "source_ids": ["S1", "S2"]},
+                ],
+                "research_sources": [
+                    {"source_id": "S1", "title": "Use", "url": "https://example.com/1"},
+                    {"source_id": "S2", "title": "Banned", "url": "https://example.com/2"},
+                ],
+                "research_reviews": [
+                    {
+                        "sufficient": True,
+                        "weak_or_unsupported_findings": ["Duplicate source S2 should not support claims."],
+                        "selected_report_sources": [
+                            {"source_id": "S1", "status": "use", "reason": "primary"},
+                            {"source_id": "S2", "status": "use", "reason": "duplicate"},
+                        ],
+                        "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "ok"}],
+                    }
+                ],
+            },
+        )
+    )
+
+    bundle = update["report_bundle"]
+    assert [finding["finding_id"] for finding in bundle["findings"]] == ["F1"]
+    assert bundle["findings"][0]["citation_source_ids"] == ["S1"]
+    assert {
+        "type": "pruned_finding_citations",
+        "finding_id": "F1",
+        "pruned_source_ids": ["S2"],
+    } in bundle["methodology_caveats"]
+
+
+def test_build_report_bundle_drops_finding_when_all_citations_are_banned():
+    update = build_report_bundle(
+        cast(
+            AgentState,
+            {
+                "research_findings": [
+                    {"summary": "Fully banned claim", "source_ids": ["S1", "S2"]},
+                ],
+                "research_sources": [
+                    {"source_id": "S1", "title": "Banned 1", "url": "https://example.com/1"},
+                    {"source_id": "S2", "title": "Banned 2", "url": "https://example.com/2"},
+                ],
+                "research_reviews": [
+                    {
+                        "sufficient": True,
+                        "contradiction_notes": ["Contradictory support from S1 and S2."],
+                        "selected_report_sources": [
+                            {"source_id": "S1", "status": "use", "reason": "selected"},
+                            {"source_id": "S2", "status": "use", "reason": "selected"},
+                        ],
+                        "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "ok"}],
+                    }
+                ],
+            },
+        )
+    )
+
+    bundle = update["report_bundle"]
+    assert bundle["findings"] == []
+    assert any(caveat["type"] == "dropped_banned_finding" for caveat in bundle["methodology_caveats"])
+
+
 def test_build_report_bundle_demotes_missing_evidence_reads_and_keeps_repair_caveats():
     update = build_report_bundle(
         cast(

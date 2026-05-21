@@ -31,18 +31,22 @@ def build_report_bundle(state: AgentState) -> dict[str, dict[str, object]]:
 
     findings: list[dict[str, object]] = []
     for finding in _selected_findings(state, review):
-        if any(sid in banned for sid in finding.get("source_ids", []) or []):
+        source_ids = _finding_source_ids(finding)
+        banned_source_ids = [sid for sid in source_ids if sid in banned]
+        kept_source_ids = [sid for sid in source_ids if sid not in banned]
+        if source_ids and banned_source_ids and not kept_source_ids:
             banned_finding_id = str(finding.get("finding_id") or "")
             methodology_caveats.append(
                 {
                     "type": "dropped_banned_finding",
                     "finding_id": banned_finding_id,
-                    "source_ids": [sid for sid in finding.get("source_ids", []) or [] if sid in banned],
+                    "source_ids": banned_source_ids,
                     "message": "A finding was dropped because the latest review marked one of its sources as contradictory or weak.",
                 }
             )
             continue
-        bundled = _bundle_finding(finding, review, sources_by_id, source_status)
+        finding_for_bundle = {**finding, "source_ids": kept_source_ids} if banned_source_ids else finding
+        bundled = _bundle_finding(finding_for_bundle, review, sources_by_id, source_status)
         if bundled is None:
             methodology_caveats.append(
                 {
@@ -52,6 +56,19 @@ def build_report_bundle(state: AgentState) -> dict[str, dict[str, object]]:
                 }
             )
             continue
+        bundled_citations = bundled.get("citation_source_ids", [])
+        bundled_citation_source_ids = [
+            sid for sid in bundled_citations if isinstance(sid, str)
+        ] if isinstance(bundled_citations, list) else []
+        pruned_source_ids = [sid for sid in source_ids if sid not in bundled_citation_source_ids]
+        if pruned_source_ids:
+            methodology_caveats.append(
+                {
+                    "type": "pruned_finding_citations",
+                    "finding_id": bundled["finding_id"],
+                    "pruned_source_ids": pruned_source_ids,
+                }
+            )
         if _requires_missing_evidence_read(bundled, review, state):
             bundled["status"] = "caution"
             methodology_caveats.append(
@@ -168,6 +185,10 @@ def _bundle_finding(
         "source_ids": citation_source_ids,
         "supporting_source_statuses": {sid: source_status.get(sid, "use") for sid in citation_source_ids},
     }
+
+
+def _finding_source_ids(finding: dict[str, Any]) -> list[str]:
+    return [sid for sid in finding.get("source_ids", []) or [] if isinstance(sid, str)]
 
 
 def _finding_decision_status(review: dict[str, Any], finding_id: str) -> str | None:

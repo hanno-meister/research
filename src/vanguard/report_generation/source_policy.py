@@ -41,6 +41,8 @@ def report_sources_by_id(state: AgentState, review: dict[str, Any]) -> dict[str,
         report_sources[source_id] = {**sources[source_id], **decision}
     if report_sources:
         return report_sources
+    if decision_items:
+        return report_sources
     banned = mentioned_source_ids(list(review.get("contradiction_notes", []) or []) + list(review.get("weak_or_unsupported_findings", []) or []))
     if sources:
         for sid, src in sources.items():
