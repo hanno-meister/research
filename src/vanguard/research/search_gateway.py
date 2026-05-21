@@ -30,6 +30,7 @@ from vanguard.research.search_gateway_models import (
 from vanguard.utils.urls import (
     allowed_url_target_contains_target,
     allowed_url_target_matches_url,
+    allowed_url_target_text,
     normalize_allowed_url_targets,
 )
 
@@ -164,7 +165,7 @@ class SearchGateway:
                 + ", ".join(f"{target.domain}{target.path_prefix}" for target in disallowed_focused_domains)
             )
 
-        return tuple(target.domain for target in normalized_focused_targets)
+        return tuple(allowed_url_target_text(target) for target in normalized_focused_targets)
 
 
 class ExaSearchAdapter:
@@ -195,7 +196,7 @@ class ExaSearchAdapter:
         highlight_query: str | None = None,
     ) -> list[NormalizedSearchResult]:
         client = self.client or self._default_client()
-        include_domains = focused_domains or policy.allowed_domains
+        include_domains = _provider_include_domains(focused_domains, policy)
         kwargs: dict[str, Any] = {
             "type": "auto",
             "num_results": self.num_results,
@@ -279,7 +280,7 @@ class TavilySearchAdapter:
         highlight_query: str | None = None,
     ) -> list[NormalizedSearchResult]:
         client = self.client or self._default_client()
-        include_domains = focused_domains or policy.allowed_domains
+        include_domains = _provider_include_domains(focused_domains, policy)
         kwargs: dict[str, Any] = {
             "max_results": self.max_results,
             "search_depth": self.search_depth,
@@ -333,6 +334,13 @@ def count_domains(results: Iterable[NormalizedSearchResult]) -> dict[str, int]:
     """Count results by canonical domain."""
 
     return dict(Counter(result.canonical_domain for result in results if result.canonical_domain))
+
+
+def _provider_include_domains(focused_domains: tuple[str, ...], policy: SearchPolicy) -> tuple[str, ...]:
+    targets = normalize_allowed_url_targets(focused_domains)
+    if not targets:
+        targets = getattr(policy, "allowed_url_targets", ())
+    return tuple(target.domain for target in targets)
 
 
 def _search_result_log_records(results: Iterable[NormalizedSearchResult]) -> list[dict[str, object]]:

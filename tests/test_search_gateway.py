@@ -215,6 +215,16 @@ def test_tavily_adapter_omits_raw_content_by_default():
     assert adapter.include_raw_content is False
 
 
+@pytest.mark.asyncio
+async def test_tavily_adapter_sends_host_only_for_path_prefix_policy():
+    client = RecordingClient({"results": []})
+    adapter = TavilySearchAdapter(client=client)
+
+    await adapter.search("query", SearchPolicy(allowed_domains=("aws.amazon.com/blogs/aws/",)))
+
+    assert client.calls[0][1]["include_domains"] == ["aws.amazon.com"]
+
+
 def test_default_search_gateway_configures_results_per_provider():
     gateway = default_search_gateway(results_per_provider=10)
 
@@ -295,7 +305,7 @@ async def test_gateway_uses_focused_domains_for_provider_narrowing_but_filters_b
         highlight_query="evidence focus",
     )
 
-    assert provider.calls[0][2] == ("example.com",)
+    assert provider.calls[0][2] == ("example.com/path/",)
     assert provider.calls[0][3] == "evidence focus"
     assert [result.normalized_url for result in response.results] == [
         "https://example.com/a",
@@ -305,6 +315,20 @@ async def test_gateway_uses_focused_domains_for_provider_narrowing_but_filters_b
     assert response.rejected_results == []
     assert response.provider_counts == {"exa": 2}
     assert response.domain_counts == {"example.com": 1, "other.com": 1}
+
+
+@pytest.mark.asyncio
+async def test_gateway_keeps_path_prefix_for_focus_but_sends_provider_domain_only():
+    provider = FakeProvider([])
+    gateway = SearchGateway([provider])
+
+    await gateway.search(
+        "q",
+        SearchPolicy(allowed_domains=("aws.amazon.com/blogs/aws/",)),
+        focused_domains=["aws.amazon.com/blogs/aws/"],
+    )
+
+    assert provider.calls[0][2] == ("aws.amazon.com/blogs/aws/",)
 
 
 @pytest.mark.asyncio

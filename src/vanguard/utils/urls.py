@@ -79,6 +79,10 @@ def allowed_url_target_matches_url(target: AllowedUrlTarget, url: str) -> bool:
     return path.startswith(prefix)
 
 
+def allowed_url_target_text(target: AllowedUrlTarget) -> str:
+    return f"{target.domain}{target.path_prefix}"
+
+
 def allowed_url_target_contains_target(container: AllowedUrlTarget, candidate: AllowedUrlTarget) -> bool:
     if container.domain != candidate.domain:
         return False

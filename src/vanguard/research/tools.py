@@ -6,6 +6,7 @@ from typing import Any
 from langchain.tools import ToolRuntime, tool
 from vanguard.utils.urls import (
     allowed_url_target_contains_target,
+    allowed_url_target_text,
     normalize_allowed_url_targets,
     normalize_search_query,
 )
@@ -152,7 +153,7 @@ def _sanitize_focused_domains(
         for target in normalized_targets
         if any(allowed_url_target_contains_target(allowed, target) for allowed in allowed_url_targets)
     ]
-    return tuple(target.domain for target in valid_targets)
+    return tuple(allowed_url_target_text(target) for target in valid_targets)
 
 
 def _serialize_search_result(item, evidence_artifact=None) -> dict[str, str | None]:
