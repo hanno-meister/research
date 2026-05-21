@@ -221,11 +221,14 @@ class ExaSearchAdapter:
         return [self._normalize_result(query, result) for result in raw_results]
 
     def _contents(self, query: str) -> dict[str, Any]:
-        return {
-            "summary": {
+        contents: dict[str, Any] = {}
+        if self.text_max_characters is not None:
+            contents["text"] = {"max_characters": self.text_max_characters}
+        if self.include_summary:
+            contents["summary"] = {
                 "query": SUMMARY_PROMPT,
             }
-        }
+        return contents
 
     @staticmethod
     def _default_client() -> Any:
@@ -244,6 +247,7 @@ class ExaSearchAdapter:
             url=str(_get_field(result, "url", "")),
             title=_get_field(result, "title", None),
             summary=_get_field(result, "summary", None),
+            raw_content=_get_field(result, "text", None),
             published_date=_get_field(result, "published_date", None)
             or _get_field(result, "publishedDate", None),
         )
