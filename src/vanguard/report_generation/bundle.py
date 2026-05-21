@@ -7,7 +7,7 @@ from typing import Any, Literal
 from vanguard.state import AgentState
 
 from .findings import finding_summary, findings_with_ids
-from .source_policy import latest_review, mentioned_source_ids, report_sources_by_id
+from .source_policy import latest_review, report_sources_by_id
 
 
 ReportStatus = Literal["sufficient", "partial", "incomplete"]
@@ -21,7 +21,7 @@ def build_report_bundle(state: AgentState) -> dict[str, dict[str, object]]:
         return {"report_bundle": _empty_bundle(state, None)}
 
     sources_by_id = report_sources_by_id(state, review)
-    banned = mentioned_source_ids(_strings(review.get("contradiction_notes")) + _strings(review.get("weak_or_unsupported_findings")))
+    banned = _excluded_selected_source_ids(review)
     source_status = {source_id: str(source.get("status") or "use") for source_id, source in sources_by_id.items()}
     sources = [_bundle_source(source_id, source) for source_id, source in sources_by_id.items()]
     required_topics = _strings(review.get("required_report_topics"))
@@ -189,6 +189,14 @@ def _bundle_finding(
 
 def _finding_source_ids(finding: dict[str, Any]) -> list[str]:
     return [sid for sid in finding.get("source_ids", []) or [] if isinstance(sid, str)]
+
+
+def _excluded_selected_source_ids(review: dict[str, Any]) -> set[str]:
+    return {
+        str(item.get("source_id")).strip()
+        for item in review.get("selected_report_sources", []) or []
+        if isinstance(item, dict) and item.get("status") == "exclude" and str(item.get("source_id", "")).strip()
+    }
 
 
 def _finding_decision_status(review: dict[str, Any], finding_id: str) -> str | None:
