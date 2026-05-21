@@ -102,7 +102,7 @@ async def run_research(
                     "human_message": TREND_REPORT_EXAMPLE_MESSAGE,
                     "selected_lance": TREND_REPORT_EXAMPLE_LANCE,
                     "allowed_domains": TREND_REPORT_EXAMPLE_DOMAINS,
-                    "start_date": "2026-05-20",
+                    "start_date": "2026-05-01",
                     "end_date": "2026-05-20",
                     "verbose": False,
                 },
