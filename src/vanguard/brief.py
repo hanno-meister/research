@@ -30,6 +30,7 @@ async def write_research_brief(state: AgentState, runtime: Runtime[LangGraphConf
                 content=RESEARCH_BRIEF_PROMPT.format(
                     research_intent=state["research_intent"],
                     selected_lance=_selected_lance_text(state),
+                    date_window=_date_window_text(state),
                 )
             )
         ]
@@ -52,4 +53,13 @@ def _selected_lance_text(state: AgentState) -> str:
         f"description: {str(lance.get('description', '')).strip()}",
     ]
     text = "\n".join(part for part in parts if not part.endswith(": "))
+    return text or "none"
+
+
+def _date_window_text(state: AgentState) -> str:
+    parts = [
+        f"start_date: {start_date}" if (start_date := state.get("start_date")) else "",
+        f"end_date: {end_date}" if (end_date := state.get("end_date")) else "",
+    ]
+    text = "\n".join(part for part in parts if part)
     return text or "none"
