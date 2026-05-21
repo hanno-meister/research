@@ -888,6 +888,9 @@ async def test_review_research_reads_only_known_evidence_without_persisting_cont
     )
 
     assert len(fake_model.calls) == 2
+    rendered_prompt = fake_model.calls[0][0].content
+    assert f"Generate at most {review_node.MAX_FOLLOW_UP_WORKERS} follow-up tasks" in rendered_prompt
+    assert "All follow-up tasks must have depends_on: []" in rendered_prompt
     assert update["evidence_read_records"] == [
         {
             "source_id": "S1",
