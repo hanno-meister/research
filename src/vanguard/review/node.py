@@ -269,6 +269,7 @@ async def _evaluate(
                     search_provider_counts=state.get("search_provider_counts", {}),
                     search_domain_counts=state.get("search_domain_counts", {}),
                     evidence_snippets=evidence_snippets,
+                    max_evidence_reads=MAX_EVIDENCE_READS,
                     max_follow_up_tasks=MAX_FOLLOW_UP_WORKERS,
                 )
             )

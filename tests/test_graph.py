@@ -649,6 +649,97 @@ def test_sanitized_tasks_filters_and_normalizes_domains():
     assert sanitized[0].expected_output == "compact output"
 
 
+def test_sanitized_tasks_maps_original_descriptive_dependency_ids():
+    tasks = [
+        planning.ResearchTask(
+            id="t1_system_inventory_vendor_signals",
+            objective="Inventory vendor signals",
+            rationale="r",
+            expected_output="o",
+            effort="low",
+            depends_on=[],
+        ),
+        planning.ResearchTask(
+            id="t2_methods_capabilities_coherence",
+            objective="Methods coherence",
+            rationale="r",
+            expected_output="o",
+            effort="low",
+            depends_on=["t1_system_inventory_vendor_signals"],
+        ),
+    ]
+
+    sanitized = planning._sanitized_tasks(tasks, cast(AgentState, {}), "brief")
+
+    assert [task.id for task in sanitized] == ["task-1", "task-2"]
+    assert sanitized[1].depends_on == ["task-1"]
+
+
+def test_sanitized_tasks_keeps_shorthand_dependency_fallback():
+    tasks = [
+        planning.ResearchTask(id="alpha", objective="A", rationale="r", expected_output="o", effort="low"),
+        planning.ResearchTask(id="beta", objective="B", rationale="r", expected_output="o", effort="low"),
+        planning.ResearchTask(id="gamma", objective="C", rationale="r", expected_output="o", effort="low", depends_on=["t2"]),
+    ]
+
+    sanitized = planning._sanitized_tasks(tasks, cast(AgentState, {}), "brief")
+
+    assert sanitized[2].depends_on == ["task-2"]
+
+
+def test_sanitized_tasks_filters_self_dependency_after_mapping():
+    task = planning.ResearchTask(
+        id="t1_system_inventory",
+        objective="Inventory",
+        rationale="r",
+        expected_output="o",
+        effort="low",
+        depends_on=["t1_system_inventory"],
+    )
+
+    sanitized = planning._sanitized_tasks([task], cast(AgentState, {}), "brief")
+
+    assert sanitized[0].depends_on == []
+
+
+def test_sanitized_tasks_leaves_ambiguous_duplicate_original_dependency_unresolved():
+    tasks = [
+        planning.ResearchTask(id="task_analysis", objective="A", rationale="r", expected_output="o", effort="low"),
+        planning.ResearchTask(id="task_analysis", objective="B", rationale="r", expected_output="o", effort="low"),
+        planning.ResearchTask(id="consumer", objective="C", rationale="r", expected_output="o", effort="low", depends_on=["task_analysis"]),
+    ]
+
+    sanitized = planning._sanitized_tasks(tasks, cast(AgentState, {}), "brief")
+
+    assert sanitized[2].depends_on == ["task_analysis"]
+
+
+def test_sanitized_tasks_regression_maps_multi_dependency_chain():
+    tasks = [
+        planning.ResearchTask(id="t1_system_inventory_vendor_signals", objective="1", rationale="r", expected_output="o", effort="low"),
+        planning.ResearchTask(id="t2_methods_capabilities_coherence", objective="2", rationale="r", expected_output="o", effort="low"),
+        planning.ResearchTask(id="t3_benchmarks_evaluation", objective="3", rationale="r", expected_output="o", effort="low"),
+        planning.ResearchTask(id="t4_platform_integration_risks", objective="4", rationale="r", expected_output="o", effort="low"),
+        planning.ResearchTask(
+            id="t5_synthesis",
+            objective="5",
+            rationale="r",
+            expected_output="o",
+            effort="low",
+            depends_on=[
+                "t1_system_inventory_vendor_signals",
+                "t2_methods_capabilities_coherence",
+                "t3_benchmarks_evaluation",
+                "t4_platform_integration_risks",
+            ],
+        ),
+    ]
+
+    sanitized = planning._sanitized_tasks(tasks, cast(AgentState, {}), "brief")
+
+    assert sanitized[4].depends_on == ["task-1", "task-2", "task-3", "task-4"]
+
+
 def test_sanitized_tasks_rejects_empty_plans():
     state = {"allowed_domains": ["https://www.Example.com/path"]}
 
@@ -1068,9 +1159,10 @@ async def test_review_research_reads_only_known_evidence_without_persisting_cont
     assert len(fake_model_factory.models[1].calls) == 1
     rendered_prompt = fake_model_factory.models[0].calls[0][0].content
     final_prompt = fake_model_factory.models[1].calls[0][0].content
-    assert "Placeholder triage pass" in rendered_prompt
-    assert "Evaluate whether the research is sufficient" in final_prompt
+    assert "You are the triage pass of a two-pass research review." in rendered_prompt
+    assert "You are the final pass of a two-pass research review." in final_prompt
     assert "Use the selected evidence snippets as inspected raw evidence" not in final_prompt
+    assert f"at most {review_node.MAX_EVIDENCE_READS} source_ids" in rendered_prompt
     assert f"Generate at most {review_node.MAX_FOLLOW_UP_WORKERS} follow-up tasks" in final_prompt
     assert "All follow-up tasks must have depends_on: []" in final_prompt
     assert update["evidence_read_records"] == [

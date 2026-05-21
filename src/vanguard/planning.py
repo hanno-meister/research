@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
@@ -96,8 +97,15 @@ def _sanitized_tasks(
     id_prefix: str = "task",
 ) -> list[ResearchTask]:
     allowed_domains = _allowed_targets_from_state(state)
+    original_ids = [_original_task_id(task) for task in tasks]
+    original_id_counts = Counter(task_id for task_id in original_ids if task_id)
+    original_id_map = {
+        original_id: f"{id_prefix}-{index}"
+        for index, original_id in enumerate(original_ids, start=1)
+        if original_id and original_id_counts[original_id] == 1
+    }
     sanitized = [
-        _sanitize_task(task, index, allowed_domains, id_prefix=id_prefix)
+        _sanitize_task(task, index, allowed_domains, original_id_map, id_prefix=id_prefix)
         for index, task in enumerate(tasks, start=1)
     ]
     sanitized = [task for task in sanitized if task.objective.strip()]
@@ -121,7 +129,12 @@ def feasibility_notes_for_state(state: AgentState, research_brief: str) -> list[
 
 
 def _sanitize_task(
-    task: ResearchTask, index: int, allowed_domains: tuple[str, ...], *, id_prefix: str = "task"
+    task: ResearchTask,
+    index: int,
+    allowed_domains: tuple[str, ...],
+    original_id_map: dict[str, str],
+    *,
+    id_prefix: str = "task",
 ) -> ResearchTask:
     focused_domains = tuple(
         unique_preserving_order(
@@ -146,7 +159,7 @@ def _sanitize_task(
             "key_questions": clean_strings(task.key_questions),
             "target_terms": clean_strings(task.target_terms),
             "focused_domains": list(focused_domains),
-            "depends_on": _sanitize_depends_on(task.depends_on, index, id_prefix=id_prefix),
+            "depends_on": _sanitize_depends_on(task.depends_on, index, original_id_map, id_prefix=id_prefix),
             "expected_output": task.expected_output.strip()
             or "Compact findings with source IDs and evidence paths.",
         }
@@ -172,13 +185,22 @@ def _allowed_focus_target(focused_domain: str, allowed_domains: tuple[str, ...])
     return ""
 
 
-def _sanitize_depends_on(depends_on: list[str], index: int, *, id_prefix: str = "task") -> list[str]:
+def _sanitize_depends_on(
+    depends_on: list[str], index: int, original_id_map: dict[str, str], *, id_prefix: str = "task"
+) -> list[str]:
     dependencies = []
     for dependency in clean_strings(depends_on):
-        mapped = _planned_task_id(dependency, id_prefix=id_prefix)
+        mapped = original_id_map.get(dependency)
+        if not mapped:
+            mapped = _planned_task_id(dependency, id_prefix=id_prefix)
         if mapped and mapped != f"{id_prefix}-{index}":
             dependencies.append(mapped)
     return list(unique_preserving_order(dependencies))
+
+
+def _original_task_id(task: ResearchTask) -> str:
+    task_id = getattr(task, "id", "")
+    return task_id.strip() if isinstance(task_id, str) else ""
 
 
 def _planned_task_id(value: str, *, id_prefix: str = "task") -> str:
