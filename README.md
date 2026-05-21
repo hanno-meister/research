@@ -83,8 +83,34 @@ Then call the research endpoint:
 curl -X POST http://127.0.0.1:8000/research \
   -H 'Content-Type: application/json' \
   -d '{
-    "human_message": "Research LangGraph patterns for deep research agents",
-    "allowed_domains": ["langchain.com", "github.com"],
+    "human_message": "Create a technical trend-scouting report about emerging world generation models for spatial computing. Focus on recent systems, benchmarks, capabilities, limitations, and practical scouting recommendations.",
+    "selected_lance": {
+      "id": "scwrd",
+      "name": "Generative 3D World Models & Spatial Intelligence",
+      "description": "Exploring and integrating emerging world generation models to create consistent, explorable 3D environments from multimodal inputs (text, images, gestures). This Lance focuses on evaluating, adapting, and integrating state-of-the-art world generation tools—like World Labs Marble, NVIDIA Cosmos, and text-to-3D platforms—into spatial computing workflows."
+    },
+    "allowed_domains": [
+      "technologyreview.com",
+      "deeplearning.ai/the-batch/",
+      "theneurondaily.com",
+      "arxiv.org",
+      "tldr.tech",
+      "microsoft.com/en-us/ai/blog/",
+      "aws.amazon.com/blogs/aws/",
+      "ai.meta.com/blog/",
+      "machinelearning.apple.com/",
+      "openai.com/news/research/",
+      "blogs.nvidia.com/blog/",
+      "deepmind.google/blog/",
+      "tencent.com/en-us/articles/",
+      "research.baidu.com/blog/",
+      "turing.ac.uk/news",
+      "greensoftware.foundation/articles/",
+      "thequantuminsider.com/",
+      "venturebeat.com/category/ai/"
+    ],
+    "start_date": "2026-05-01",
+    "end_date": "2026-05-20",
     "verbose": false
   }'
 ```
