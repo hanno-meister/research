@@ -214,6 +214,7 @@ class FakeReviewModel:
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = []
+        self.init_kwargs = {}
 
     def with_structured_output(self, schema):
         self.schema = schema
@@ -222,6 +223,18 @@ class FakeReviewModel:
     async def ainvoke(self, payload):
         self.calls.append(payload)
         return self.responses.pop(0)
+
+
+class FakeReviewModelFactory:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.models = []
+
+    def __call__(self, **kwargs):
+        model = FakeReviewModel([self.responses.pop(0)])
+        model.init_kwargs = kwargs
+        self.models.append(model)
+        return model
 
 
 def test_slim_source_for_review_keeps_only_review_fields_without_mutating_original():
@@ -984,7 +997,7 @@ def test_truncate_summary_for_review_leaves_short_summaries_unchanged():
 async def test_review_research_reads_only_known_evidence_without_persisting_content(monkeypatch, tmp_path):
     backend = filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path))
     backend.write("/evidence/real-research.md", "important raw evidence content")
-    fake_model = FakeReviewModel(
+    fake_model_factory = FakeReviewModelFactory(
         [
             review.ResearchEvaluation(
                 sufficient=False,
@@ -1008,7 +1021,7 @@ async def test_review_research_reads_only_known_evidence_without_persisting_cont
             ),
         ]
     )
-    monkeypatch.setattr(review_node, "ChatOpenAI", lambda **kwargs: fake_model)
+    monkeypatch.setattr(review_node, "ChatOpenAI", fake_model_factory)
 
     update = await review.review_research(
         {
@@ -1047,13 +1060,19 @@ async def test_review_research_reads_only_known_evidence_without_persisting_cont
                 }
             ],
         },
-        SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key", evidence_root=tmp_path)),
+        SimpleNamespace(context=SimpleNamespace(small_model="small", large_model="large", openai_base_url="url", azure_openai_api_key="key", evidence_root=tmp_path)),
     )
 
-    assert len(fake_model.calls) == 2
-    rendered_prompt = fake_model.calls[0][0].content
-    assert f"Generate at most {review_node.MAX_FOLLOW_UP_WORKERS} follow-up tasks" in rendered_prompt
-    assert "All follow-up tasks must have depends_on: []" in rendered_prompt
+    assert [model.init_kwargs["model"] for model in fake_model_factory.models] == ["small", "large"]
+    assert len(fake_model_factory.models[0].calls) == 1
+    assert len(fake_model_factory.models[1].calls) == 1
+    rendered_prompt = fake_model_factory.models[0].calls[0][0].content
+    final_prompt = fake_model_factory.models[1].calls[0][0].content
+    assert "Placeholder triage pass" in rendered_prompt
+    assert "Evaluate whether the research is sufficient" in final_prompt
+    assert "Use the selected evidence snippets as inspected raw evidence" not in final_prompt
+    assert f"Generate at most {review_node.MAX_FOLLOW_UP_WORKERS} follow-up tasks" in final_prompt
+    assert "All follow-up tasks must have depends_on: []" in final_prompt
     assert update["evidence_read_records"] == [
         {
             "source_id": "S1",
@@ -1752,7 +1771,7 @@ def test_build_report_bundle_drops_finding_with_only_excluded_citations():
 
     bundle = update["report_bundle"]
     assert bundle["findings"] == []
-    assert any(caveat["type"] == "dropped_finding_without_kept_citations" for caveat in bundle["methodology_caveats"])
+    assert any(caveat["type"] == "dropped_banned_finding" for caveat in bundle["methodology_caveats"])
 
 
 def test_build_report_bundle_keeps_use_citations_unchanged_without_pruning_caveat():
@@ -1787,7 +1806,7 @@ def test_build_report_bundle_keeps_use_citations_unchanged_without_pruning_cavea
     assert not any(caveat["type"] == "pruned_finding_citations" for caveat in bundle["methodology_caveats"])
 
 
-def test_build_report_bundle_prunes_banned_finding_citations_with_caveat():
+def test_build_report_bundle_prunes_excluded_finding_citations_from_selected_sources_only():
     update = build_report_bundle(
         cast(
             AgentState,
@@ -1802,10 +1821,9 @@ def test_build_report_bundle_prunes_banned_finding_citations_with_caveat():
                 "research_reviews": [
                     {
                         "sufficient": True,
-                        "weak_or_unsupported_findings": ["Duplicate source S2 should not support claims."],
                         "selected_report_sources": [
                             {"source_id": "S1", "status": "use", "reason": "primary"},
-                            {"source_id": "S2", "status": "use", "reason": "duplicate"},
+                            {"source_id": "S2", "status": "exclude", "reason": "duplicate"},
                         ],
                         "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "ok"}],
                     }
@@ -1824,25 +1842,26 @@ def test_build_report_bundle_prunes_banned_finding_citations_with_caveat():
     } in bundle["methodology_caveats"]
 
 
-def test_build_report_bundle_drops_finding_when_all_citations_are_banned():
+def test_build_report_bundle_keeps_use_source_mentioned_in_contradiction_notes():
     update = build_report_bundle(
         cast(
             AgentState,
             {
                 "research_findings": [
-                    {"summary": "Fully banned claim", "source_ids": ["S1", "S2"]},
+                    {"summary": "Claim supported by prose-mentioned source", "source_ids": ["S6"]},
                 ],
                 "research_sources": [
-                    {"source_id": "S1", "title": "Banned 1", "url": "https://example.com/1"},
-                    {"source_id": "S2", "title": "Banned 2", "url": "https://example.com/2"},
+                    {"source_id": "S6", "title": "NVIDIA blog", "url": "https://blogs.nvidia.com/blog/google-cloud-developer-community-ai-builders/"},
                 ],
                 "research_reviews": [
                     {
                         "sufficient": True,
-                        "contradiction_notes": ["Contradictory support from S1 and S2."],
+                        "contradiction_notes": ["S6 explains context for why S77-S79 were excluded."],
+                        "weak_or_unsupported_findings": ["Do not infer exclusion from prose mentioning S6."],
+                        "source_quality_assessment": "S6 is adequate; only selected_report_sources controls source exclusion.",
                         "selected_report_sources": [
-                            {"source_id": "S1", "status": "use", "reason": "selected"},
-                            {"source_id": "S2", "status": "use", "reason": "selected"},
+                            {"source_id": "S6", "status": "use", "reason": "selected"},
+                            {"source_id": "S77", "status": "exclude", "reason": "unsupported"},
                         ],
                         "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "ok"}],
                     }
@@ -1852,8 +1871,10 @@ def test_build_report_bundle_drops_finding_when_all_citations_are_banned():
     )
 
     bundle = update["report_bundle"]
-    assert bundle["findings"] == []
-    assert any(caveat["type"] == "dropped_banned_finding" for caveat in bundle["methodology_caveats"])
+    assert [finding["finding_id"] for finding in bundle["findings"]] == ["F1"]
+    assert bundle["findings"][0]["citation_source_ids"] == ["S6"]
+    assert not any(caveat["type"] == "dropped_banned_finding" for caveat in bundle["methodology_caveats"])
+    assert not any(caveat["type"] == "dropped_finding_without_kept_citations" for caveat in bundle["methodology_caveats"])
 
 
 def test_build_report_bundle_demotes_missing_evidence_reads_and_keeps_repair_caveats():

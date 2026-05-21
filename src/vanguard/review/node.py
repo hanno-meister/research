@@ -22,7 +22,7 @@ from .defaults import (
 )
 from .evidence import read_selected_evidence
 from .models import EvidenceReadRequest, ResearchEvaluation
-from .prompts import REVIEW_RESEARCH_PROMPT
+from .prompts import REVIEW_FINAL_PROMPT, REVIEW_TRIAGE_PROMPT
 
 
 logger = logging.getLogger(__name__)
@@ -106,7 +106,8 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
     if not state.get("research_brief"):
         raise ValueError("Missing research_brief. Did write_research_brief run?")
 
-    model = _review_model(runtime.context)
+    triage_model = _triage_review_model(runtime.context)
+    final_model = _final_review_model(runtime.context)
     backend = filesystem_backend_for_config(runtime.context)
     evidence_snippets: list[dict[str, str | int]] = []
     review_sources, excluded_sources, excluded_count = filter_sources_for_review(
@@ -130,12 +131,14 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
     )
 
     evaluation = await _evaluate(
-        model,
+        triage_model,
         state,
+        phase="triage",
         round_number=round_number,
         review_sources=review_sources,
         excluded_ghost_list=excluded_ghost_list,
         evidence_snippets=evidence_snippets,
+        prompt_template=REVIEW_TRIAGE_PROMPT,
     )
     requested_evidence = list(evaluation.evidence_to_read)
 
@@ -168,12 +171,14 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
     if round_reads:
         logger.info("Re-evaluating research after evidence reads", extra={"round": round_number})
         evaluation = await _evaluate(
-            model,
+            final_model,
             state,
+            phase="final",
             round_number=round_number,
             review_sources=review_sources,
             excluded_ghost_list=excluded_ghost_list,
             evidence_snippets=evidence_snippets,
+            prompt_template=REVIEW_FINAL_PROMPT,
         )
 
     review_record = _review_record(
@@ -199,9 +204,17 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
     return update
 
 
-def _review_model(config: LangGraphConfig):
+def _triage_review_model(config: LangGraphConfig):
+    return _review_model(config, model_name=config.small_model)
+
+
+def _final_review_model(config: LangGraphConfig):
+    return _review_model(config, model_name=config.large_model)
+
+
+def _review_model(config: LangGraphConfig, *, model_name: str):
     return ChatOpenAI(
-        model=config.large_model,
+        model=model_name,
         base_url=config.openai_base_url,
         api_key=config.azure_openai_api_key,
         use_responses_api=False,
@@ -212,16 +225,19 @@ async def _evaluate(
     model,
     state: AgentState,
     *,
+    phase: str,
     round_number: int,
     review_sources: list[dict],
     excluded_ghost_list: list[dict],
     evidence_snippets: list[dict[str, str | int]],
+    prompt_template: str,
 ) -> ResearchEvaluation:
     start = perf_counter()
     logger.info(
         "Calling review model",
         extra={
             "round": round_number,
+            "phase": phase,
             "finding_count": len(state.get("research_findings", []) or []),
             "source_count": len(state.get("research_sources", []) or []),
             "review_source_count": len(review_sources),
@@ -235,7 +251,7 @@ async def _evaluate(
     response = await model.ainvoke(
         [
             HumanMessage(
-                content=REVIEW_RESEARCH_PROMPT.format(
+                content=prompt_template.format(
                     round_number=round_number,
                     research_brief=state.get("research_brief", ""),
                     research_tasks=state.get("research_tasks", []),
@@ -264,6 +280,7 @@ async def _evaluate(
         "Review model completed",
         extra={
             "round": round_number,
+            "phase": phase,
             "duration_seconds": round(perf_counter() - start, 3),
             "sufficient": response.sufficient,
             "evidence_request_count": len(response.evidence_to_read),

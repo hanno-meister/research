@@ -1,8 +1,7 @@
 """Prompts for research review."""
 
 
-REVIEW_RESEARCH_PROMPT = """Evaluate whether the research is sufficient for final report generation. Check coverage, source quality, contradictions, weak or unsupported findings, duplicates, stale/superseded items, and control/meta findings, and whether planned target_terms were covered. If follow-up is needed, propose only targeted bounded tasks. Generate at most {max_follow_up_tasks} follow-up tasks. Order them strictly by priority so the most critical task runs first if the budget is exceeded. All follow-up tasks must have depends_on: [] unless a second repair cycle is explicitly confirmed available. Tasks with non-empty depends_on will be silently dropped in a single-repair-cycle pipeline. Apply higher scrutiny to recent, numerical, market/financial, predictive, or disputed claims. Prefer primary, official, regulatory, academic, and established expert sources; treat aggregators, feeds, low-context indexes, and speculative commentary as weaker support unless corroborated. Do not mark research sufficient just because sources exist: the retained findings must answer the brief with source_ids that support the claims. If a requested date window is present, do not select or recommend citing sources with visible/published dates that clearly fall outside that window; sources with no visible/published date may still be selected when otherwise relevant and credible. Set core_brief_answerable=false only when no caveated answer to the core brief is supportable from available evidence; if evidence supports a limited report with explicit gaps, leave core_brief_answerable true or unset and describe those gaps. Weakness notes are control data for filtering, not user-facing findings. Prefer follow-up findings when they resolve earlier uncertainty and supersede older conflicts. If sufficient=false and core_brief_answerable=true, you must populate follow_up_tasks. Leaving it empty when the brief is answerable but evidence is incomplete is a review error — it would route to final report generation on insufficient evidence. Feasibility notes describe source constraints that may make parts of the brief impossible under current runtime policy. Populate required_report_topics with important source-supported targets/dimensions the final report should cover. Populate coverage_gaps with important target_terms/topics that remain missing, weakly supported, or undercovered; if the research is still sufficient, these gaps should be caveats rather than blockers. Follow-up tasks must stay within current allowed_domains; never propose tasks requiring unavailable domains. If a gap requires unavailable domains, state that in coverage/source-quality assessment or coverage_gaps rather than proposing an unreachable task. For follow-up tasks with focused domains, write objectives, key questions, target_terms, and expected output using source-native query angles that imply what to search for on those domains; avoid generic entity-only wording. Do not ask follow-up workers to use site:, domain names, OR chains, or other search-engine syntax because domain restrictions are enforced by runtime policy. Request raw evidence reads for high-value sources that need deeper inspection for validation or final report synthesis. Request at most 5 evidence reads per round. If more than 5 sources warrant reading, prioritize by: (1) sources that directly verify a claim under contradiction, (2) highest-value primary sources whose summaries are too thin to support final report use, (3) sources flagged caution that would become use with deeper inspection. Unread high-value sources can be requested in round 2 if a repair round runs. Choose sources by source_id from research_sources; Python will resolve the source_id to its known raw_content_path. Do not request arbitrary paths and do not ask to read all evidence. After evidence reads are processed, use those findings to inform selected_report_sources decisions: sources read and confirmed go to use, sources read and found weak go to caution or exclude. Populate selected_report_sources with use/caution/exclude decisions for all sources relevant to final report synthesis; include only known source_id values from research_sources. Also populate selected_report_findings with use/caution/exclude decisions for finding_id values provided by Python.
-
+_REVIEW_CONTEXT = """
 Review round: {round_number}
 Research brief:
 {research_brief}
@@ -30,3 +29,59 @@ Domain counts: {search_domain_counts}
 
 Selected evidence snippets already read:
 {evidence_snippets}"""
+
+
+# TODO:Use structured output
+REVIEW_TRIAGE_PROMPT = """You are the triage pass of a two-pass research review. Your only job is to select which evidence files the final reviewer should read in full before making their judgment.
+
+Output evidence_to_read as a ranked list of at most {max_evidence_reads} source_ids, most important first, with a one-line reason per selection.
+
+Select sources where reading raw content would change a decision the final reviewer must make. Strong candidates:
+- Sources whose summaries make load-bearing factual or numerical claims that are the primary or only support for required-coverage topics from the research brief
+- Sources flagged with warnings, or whose type suggests low context: search index pages, author pages, feed/index pages, or aggregators
+- Sources with a summary that is too thin, vague, or high-level to verify whether the finding's specific claim is actually present
+- Sources where the published date or URL suggests a possible date-window mismatch with the requested window
+- Sources that are the sole citation for a finding on a required named target (e.g. a specific product, system, or benchmark named in the brief)
+
+Deprioritize sources that are clearly supplementary, redundant with stronger evidence already in the corpus, or whose summary already contains enough detail to evaluate the claim confidently.
+
+Do not assess overall coverage. Do not evaluate source quality beyond triage-level suspicion flags. Do not identify contradictions. Do not assess whether findings are weak or unsupported. Do not propose follow-up tasks. Do not write any notes about the research being sufficient or insufficient. Those are the final reviewer's job.
+
+Output only:
+- evidence_to_read: ranked list of source_ids with one-line reasons
+- triage_notes: a short list of any suspicion flags worth flagging to the final reviewer (e.g. "S79 appears to be an arXiv search index page, verify date and source type before using for primary claims"). Leave empty if nothing flagged.
+""" + _REVIEW_CONTEXT
+
+
+REVIEW_FINAL_PROMPT = """You are the final pass of a two-pass research review. Triage has already selected evidence files for reading, and their raw content is included in the context below alongside triage_notes flagging any suspicion points. Use the raw content and triage notes to inform your judgment.
+
+Your job is to make the sufficiency judgment, filter findings and sources for the report bundle, and decide whether repair research is needed.
+
+Evaluate all of the following:
+- Coverage of the research brief and required target terms
+- Whether retained findings actually answer the brief, not just whether sources exist
+- Source quality: apply higher scrutiny to recent, numerical, market/financial, predictive, or disputed claims; prefer primary, official, regulatory, academic, and established expert sources; treat aggregators, feeds, low-context indexes, and speculative commentary as weaker support unless corroborated
+- Contradictions between findings or between findings and raw evidence you read
+- Weak or unsupported findings: a finding is weak if its cited source_ids do not actually contain the claimed information, or if the sources are out-of-window, low-context, or flagged by triage
+- Duplicates and near-duplicates across sources and findings
+- Stale or superseded items, especially where a repair round produced newer evidence that resolves an earlier conflict
+- Control and meta findings that describe search failures or task-execution issues and should not surface to the user as substantive findings
+
+Date-window handling: if a requested date window is present, do not select or recommend citing sources with visible published dates or URL identifiers that clearly fall outside that window. Sources with no visible date may be selected when otherwise credible and relevant, but must be labeled as undated. When raw content you read confirms a source is out-of-window or low-context (e.g. an arXiv search index page containing abstracts from outside the window), exclude it and walk back any findings whose support collapses as a result, including findings that were not directly cited by that source but depended on it for a claim chain.
+
+Sufficiency rules:
+- Do not mark research sufficient just because sources exist. Retained findings must answer the brief with source_ids that actually support the claims.
+- Set core_brief_answerable=false only when no caveated answer to the core brief is supportable from the available evidence. If evidence supports a limited report with explicit gaps, leave core_brief_answerable true and describe the gaps in coverage_assessment.
+- If sufficient=false and core_brief_answerable=true, you must populate follow_up_tasks. Leaving follow_up_tasks empty when the brief is answerable but evidence is incomplete is a review error: it routes to final report generation instead of repair.
+
+Follow-up task rules:
+- Generate at most {max_follow_up_tasks} follow-up tasks.
+- Order strictly by priority so the most critical task runs first if the budget is exceeded.
+- All follow-up tasks must have depends_on: [] unless a second repair cycle is explicitly confirmed available in this pipeline. Tasks with non-empty depends_on will be silently dropped in a single-repair-cycle pipeline.
+- Prefer follow-up tasks that resolve earlier uncertainty or supersede older conflicting findings rather than expanding scope.
+
+Weakness notes are control data for bundle filtering, not user-facing findings. Write them precisely so the bundle builder can act on them accurately.
+""" + _REVIEW_CONTEXT
+
+
+REVIEW_RESEARCH_PROMPT = REVIEW_FINAL_PROMPT
