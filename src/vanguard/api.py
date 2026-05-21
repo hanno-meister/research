@@ -87,6 +87,11 @@ def get_runtime_config() -> LangGraphConfig:
 app = FastAPI(title="Vanguard Research API")
 
 
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.post("/research", response_model=ResearchResponse, response_model_exclude_none=True)
 async def run_research(
     request: ResearchRequest = Body(
