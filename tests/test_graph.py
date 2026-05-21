@@ -149,6 +149,53 @@ class FakeEmptySearchResearchAgent:
         }
 
 
+class DistinctRepairSourceAgent:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def ainvoke(self, payload, **kwargs):
+        self.calls.append((payload, kwargs))
+        task_id = kwargs["context"].task_id
+        url = f"https://example.com/{task_id}"
+        path = f"/evidence/{task_id}.md"
+        kwargs["context"].recorder.record_search_results(
+            [
+                {
+                    "provider": "exa",
+                    "query": task_id,
+                    "url": url,
+                    "title": f"Source {task_id}",
+                    "summary": "Task-specific source.",
+                    "raw_content_path": path,
+                    "published_date": "2026-05-01",
+                    "normalized_url": url,
+                    "canonical_domain": "example.com",
+                }
+            ],
+            [
+                {
+                    "provider": "exa",
+                    "url": url,
+                    "title": f"Source {task_id}",
+                    "path": path,
+                    "content_sha256": f"sha-{task_id}",
+                    "content_characters": 47,
+                }
+            ],
+        )
+        return {
+            "structured_response": research.ResearchAgentOutput(
+                findings=[
+                    research.ResearchFinding(
+                        summary=f"Finding for {task_id}.",
+                        source_ids=[kwargs["context"].recorder.sources()[-1]["source_id"]],
+                        evidence_paths=[path],
+                    )
+                ],
+            )
+        }
+
+
 class FakePlanningModel:
     def __init__(self, response):
         self.response = response
@@ -817,6 +864,122 @@ def test_topological_task_batches_rejects_cycles():
         )
 
 
+def test_filter_sources_for_review_keeps_only_cited_quality_sources():
+    sources = [
+        {"source_id": "S1", "source_type": "source", "source_quality": "high", "title": "Eligible"},
+        {"source_id": "S2", "source_type": "source", "source_quality": "high", "title": "Uncited"},
+        {"source_id": "S3", "source_type": "index_or_feed", "source_quality": "high", "title": "Feed"},
+        {"source_id": "S4", "source_type": "source", "source_quality": "low", "title": "Low quality"},
+    ]
+    findings = [{"source_ids": ["S1", "S3", "S4"]}]
+
+    eligible, excluded, excluded_count = review_node.filter_sources_for_review(sources, findings)
+
+    assert eligible == [sources[0]]
+    assert excluded == [sources[1], sources[2], sources[3]]
+    assert excluded_count == len(sources) - len(eligible)
+
+
+def test_build_excluded_ghost_list_returns_minimal_fields_and_reasons():
+    excluded_sources = [
+        {
+            "source_id": "S1",
+            "title": "Feed source",
+            "canonical_domain": "feed.example",
+            "source_type": "index_or_feed",
+            "source_quality": "high",
+            "summary": "Should not appear",
+            "url": "https://feed.example/a",
+            "provider": "exa",
+        },
+        {
+            "source_id": "S2",
+            "title": "Low quality source",
+            "canonical_domain": "low.example",
+            "source_type": "source",
+            "source_quality": "low",
+            "summary": "Should not appear",
+            "url": "https://low.example/a",
+            "provider": "tavily",
+        },
+        {
+            "source_id": "S3",
+            "title": "Uncited source",
+            "canonical_domain": "uncited.example",
+            "source_type": "source",
+            "source_quality": "high",
+            "summary": "Should not appear",
+            "url": "https://uncited.example/a",
+            "provider": "exa",
+        },
+        {
+            "source_id": "S4",
+            "title": "Uncited low quality source",
+            "canonical_domain": "uncited-low.example",
+            "source_type": "source",
+            "source_quality": "low",
+            "summary": "Should not appear",
+            "url": "https://uncited-low.example/a",
+            "provider": "exa",
+        },
+    ]
+
+    ghost_list = review_node.build_excluded_ghost_list(excluded_sources)
+
+    assert ghost_list == [
+        {
+            "source_id": "S1",
+            "title": "Feed source",
+            "canonical_domain": "feed.example",
+            "exclusion_reason": "index_or_feed",
+        },
+        {
+            "source_id": "S2",
+            "title": "Low quality source",
+            "canonical_domain": "low.example",
+            "exclusion_reason": "low_quality",
+        },
+        {
+            "source_id": "S3",
+            "title": "Uncited source",
+            "canonical_domain": "uncited.example",
+            "exclusion_reason": "uncited",
+        },
+        {
+            "source_id": "S4",
+            "title": "Uncited low quality source",
+            "canonical_domain": "uncited-low.example",
+            "exclusion_reason": "low_quality",
+        },
+    ]
+    assert all(
+        set(entry) == {"source_id", "title", "canonical_domain", "exclusion_reason"}
+        for entry in ghost_list
+    )
+
+
+def test_truncate_summary_for_review_limits_long_summaries_without_mutation():
+    long_summary = "x" * (review_node.MAX_REVIEW_SUMMARY_CHARS + 1)
+    source = {"source_id": "S1", "summary": long_summary, "title": "Source"}
+
+    truncated = review_node.truncate_summary_for_review(source)
+
+    assert truncated is not source
+    assert truncated["summary"] == (
+        "x" * review_node.MAX_REVIEW_SUMMARY_CHARS + "... [truncated]"
+    )
+    assert source["summary"] == long_summary
+
+
+def test_truncate_summary_for_review_leaves_short_summaries_unchanged():
+    exact_summary = "x" * review_node.MAX_REVIEW_SUMMARY_CHARS
+    exact_source = {"source_id": "S1", "summary": exact_summary}
+    short_source = {"source_id": "S2", "summary": "short"}
+
+    assert review_node.truncate_summary_for_review(exact_source) is exact_source
+    assert review_node.truncate_summary_for_review(short_source) is short_source
+
+
 @pytest.mark.asyncio
 async def test_review_research_reads_only_known_evidence_without_persisting_content(monkeypatch, tmp_path):
     backend = filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path))
@@ -999,6 +1162,279 @@ async def test_repair_research_runs_bounded_follow_up_workers(monkeypatch, tmp_p
             "repair_task_id": "follow-up-1",
         }
     ]
+
+
+def test_repair_follow_up_worker_tasks_returns_all_independent_tasks_when_capacity_allows():
+    follow_up_tasks = [
+        planning.ResearchTask(
+            id="fu-1",
+            objective="Collect architecture notes",
+            rationale="Independent evidence task.",
+            expected_output="Architecture notes.",
+            effort="low",
+        ).model_dump(),
+        planning.ResearchTask(
+            id="fu-2",
+            objective="Collect persistence notes",
+            rationale="Independent evidence task.",
+            expected_output="Persistence notes.",
+            effort="low",
+        ).model_dump(),
+        planning.ResearchTask(
+            id="fu-3",
+            objective="Collect deployment notes",
+            rationale="Independent evidence task.",
+            expected_output="Deployment notes.",
+            effort="low",
+        ).model_dump(),
+    ]
+
+    worker_tasks = review_followup.follow_up_worker_tasks(
+        [planning.ResearchTask.model_validate(task) for task in follow_up_tasks],
+        cast(AgentState, {"allowed_domains": ["example.com"], "research_brief": "brief"}),
+        remaining_workers=3,
+        remaining_workers_by_search_budget=3,
+    )
+
+    assert [task.id for task in worker_tasks] == ["follow-up-1", "follow-up-2", "follow-up-3"]
+    assert worker_tasks[0].objective == "Collect architecture notes"
+    assert worker_tasks[1].objective == "Collect persistence notes"
+    assert worker_tasks[2].objective == "Collect deployment notes"
+
+
+@pytest.mark.asyncio
+async def test_repair_research_runs_three_independent_follow_up_workers(monkeypatch, tmp_path):
+    agent = ConcurrentFakeResearchAgent()
+    monkeypatch.setattr(review_followup, "create_research_agent", lambda config, backend=None: agent)
+    monkeypatch.setattr(
+        review_followup,
+        "filesystem_backend_for_config",
+        lambda _config: filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path)),
+    )
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_WORKERS", 3)
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_SEARCHES", 3)
+
+    update = await review.repair_research(
+        {
+            "research_intent": "intent",
+            "research_brief": "brief",
+            "allowed_domains": ["example.com"],
+            "start_date": "2026-05-01",
+            "end_date": "2026-05-20",
+            "research_findings": [],
+            "research_sources": [],
+            "evidence_artifacts": [],
+            "review_round": 4,
+            "research_reviews": [
+                {
+                    "round": 4,
+                    "sufficient": False,
+                    "follow_up_tasks": [
+                        planning.ResearchTask(id="fu-1", objective="First", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                        planning.ResearchTask(id="fu-2", objective="Second", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                        planning.ResearchTask(id="fu-3", objective="Third", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                    ],
+                }
+            ],
+        },
+        SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key")),
+    )
+
+    assert agent.max_active_calls == 3
+    assert len(agent.calls) == 3
+    assert update["repair_logs"][0]["tasks_run"] == ["follow-up-1", "follow-up-2", "follow-up-3"]
+
+
+@pytest.mark.asyncio
+async def test_repair_research_reports_zero_search_budget_and_task_failure(monkeypatch, tmp_path):
+    agent = FakeNoSearchResearchAgent()
+    monkeypatch.setattr(review_followup, "create_research_agent", lambda config, backend=None: agent)
+    monkeypatch.setattr(
+        review_followup,
+        "filesystem_backend_for_config",
+        lambda _config: filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path)),
+    )
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_WORKERS", 1)
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_SEARCHES", 1)
+
+    update = await review.repair_research(
+        {
+            "research_intent": "intent",
+            "research_brief": "brief",
+            "allowed_domains": ["example.com"],
+            "start_date": "2026-05-01",
+            "end_date": "2026-05-20",
+            "research_findings": [],
+            "research_sources": [],
+            "evidence_artifacts": [],
+            "review_round": 5,
+            "research_reviews": [
+                {
+                    "round": 5,
+                    "sufficient": False,
+                    "follow_up_tasks": [
+                        planning.ResearchTask(id="fu-1", objective="First", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                    ],
+                }
+            ],
+        },
+        SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key")),
+    )
+
+    assert update["repair_logs"][0]["search_budget_used"] == 0
+    assert update["repair_logs"][0]["tasks_failed"] == [
+        {"task_id": "follow-up-1", "error_type": "ValueError", "message": "Research worker follow-up-1 completed without calling search_gateway"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repair_research_reports_requested_and_run_tasks_when_follow_up_is_truncated(monkeypatch, tmp_path):
+    agent = ConcurrentFakeResearchAgent()
+    monkeypatch.setattr(review_followup, "create_research_agent", lambda config, backend=None: agent)
+    monkeypatch.setattr(
+        review_followup,
+        "filesystem_backend_for_config",
+        lambda _config: filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path)),
+    )
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_WORKERS", 2)
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_SEARCHES", 2)
+
+    update = await review.repair_research(
+        {
+            "research_intent": "intent",
+            "research_brief": "brief",
+            "allowed_domains": ["example.com"],
+            "start_date": "2026-05-01",
+            "end_date": "2026-05-20",
+            "research_findings": [],
+            "research_sources": [],
+            "evidence_artifacts": [],
+            "review_round": 3,
+            "research_reviews": [
+                {
+                    "round": 3,
+                    "sufficient": False,
+                    "follow_up_tasks": [
+                        planning.ResearchTask(id="fu-1", objective="First", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                        planning.ResearchTask(id="fu-2", objective="Second", rationale="r", expected_output="o", effort="low", depends_on=["fu-1"]).model_dump(),
+                        planning.ResearchTask(id="fu-3", objective="Third", rationale="r", expected_output="o", effort="low", depends_on=["fu-2"]).model_dump(),
+                    ],
+                }
+            ],
+        },
+        SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key")),
+    )
+
+    assert len(agent.calls) == 2
+    assert "First" in agent.calls[0][0]["messages"][0].content
+    assert "Second" in agent.calls[1][0]["messages"][0].content
+    assert update["repair_logs"][0]["tasks_requested"] == ["fu-1", "fu-2", "fu-3"]
+    assert update["repair_logs"][0]["tasks_run"] == ["follow-up-1", "follow-up-2"]
+    assert update["repair_logs"][0]["tasks_failed"] == []
+    assert update["repair_logs"][0]["tasks_dropped"] == [
+        {"task_id": "follow-up-3", "reason": "dropped_worker_cap"},
+    ]
+    assert update["repair_logs"][0]["search_budget_used"] == 2
+
+
+@pytest.mark.asyncio
+async def test_repair_research_remaps_source_ids_that_collide_with_existing_sources(monkeypatch, tmp_path):
+    agent = DistinctRepairSourceAgent()
+    monkeypatch.setattr(review_followup, "create_research_agent", lambda config, backend=None: agent)
+    monkeypatch.setattr(
+        review_followup,
+        "filesystem_backend_for_config",
+        lambda _config: filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path)),
+    )
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_WORKERS", 1)
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_SEARCHES", 1)
+
+    update = await review.repair_research(
+        {
+            "research_intent": "intent",
+            "research_brief": "brief",
+            "allowed_domains": ["example.com"],
+            "research_findings": [],
+            "research_sources": [
+                {
+                    "source_id": "S1",
+                    "url": "https://example.com/existing-one",
+                    "normalized_url": "https://example.com/existing-one",
+                },
+                {
+                    "source_id": "S2",
+                    "url": "https://example.com/existing-two",
+                    "normalized_url": "https://example.com/existing-two",
+                },
+                {
+                    "source_id": "S99",
+                    "url": "https://example.com/existing-ninety-nine",
+                    "normalized_url": "https://example.com/existing-ninety-nine",
+                },
+            ],
+            "evidence_artifacts": [],
+            "review_round": 6,
+            "research_reviews": [
+                {
+                    "round": 6,
+                    "sufficient": False,
+                    "follow_up_tasks": [
+                        planning.ResearchTask(id="fu-1", objective="First", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                    ],
+                }
+            ],
+        },
+        SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key")),
+    )
+
+    repair_source = update["research_sources"][0]
+    assert repair_source["source_id"] == "S4"
+    assert repair_source["source_id"] not in {"S1", "S2", "S99"}
+    assert update["research_findings"][0]["source_ids"] == ["S4"]
+
+
+@pytest.mark.asyncio
+async def test_repair_research_drops_tasks_beyond_search_cap(monkeypatch, tmp_path):
+    agent = ConcurrentFakeResearchAgent()
+    monkeypatch.setattr(review_followup, "create_research_agent", lambda config, backend=None: agent)
+    monkeypatch.setattr(
+        review_followup,
+        "filesystem_backend_for_config",
+        lambda _config: filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path)),
+    )
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_WORKERS", 3)
+    monkeypatch.setattr(review_followup, "MAX_FOLLOW_UP_SEARCHES", 2)
+
+    update = await review.repair_research(
+        {
+            "research_intent": "intent",
+            "research_brief": "brief",
+            "allowed_domains": ["example.com"],
+            "research_findings": [],
+            "research_sources": [],
+            "evidence_artifacts": [],
+            "review_round": 7,
+            "research_reviews": [
+                {
+                    "round": 7,
+                    "sufficient": False,
+                    "follow_up_tasks": [
+                        planning.ResearchTask(id="fu-1", objective="First", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                        planning.ResearchTask(id="fu-2", objective="Second", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                        planning.ResearchTask(id="fu-3", objective="Third", rationale="r", expected_output="o", effort="low", depends_on=[]).model_dump(),
+                    ],
+                }
+            ],
+        },
+        SimpleNamespace(context=SimpleNamespace(large_model="large", openai_base_url="url", azure_openai_api_key="key")),
+    )
+
+    repair_log = update["repair_logs"][0]
+    assert repair_log["tasks_run"] == ["follow-up-1", "follow-up-2"]
+    assert repair_log["tasks_dropped"] == [
+        {"task_id": "follow-up-3", "reason": "dropped_search_cap"},
+    ]
+    assert repair_log["search_budget_used"] <= 2
 
 
 @pytest.mark.asyncio
