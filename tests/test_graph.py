@@ -177,6 +177,32 @@ class FakeReviewModel:
         return self.responses.pop(0)
 
 
+def test_slim_source_for_review_keeps_only_review_fields_without_mutating_original():
+    source = {
+        "source_id": "S1",
+        "title": "Research source",
+        "summary": "Summary",
+        "published_date": "2026-05-01",
+        "canonical_domain": "example.com",
+        "source_type": "primary",
+        "source_quality": "high",
+        "source_warnings": ["warning"],
+        "provider": "exa",
+        "query": "intent",
+        "url": "https://example.com/research",
+        "normalized_url": "https://example.com/research",
+        "raw_content_path": "/evidence/real-research.md",
+    }
+    original = dict(source)
+
+    slimmed = review_node.slim_source_for_review(source)
+
+    assert set(slimmed) == review_node.REVIEW_SOURCE_FIELDS
+    assert slimmed == {key: source[key] for key in review_node.REVIEW_SOURCE_FIELDS}
+    assert source == original
+    assert slimmed is not source
+
+
 @pytest.mark.asyncio
 async def test_conduct_research_invokes_agent_and_returns_compact_state(monkeypatch):
     agent = FakeResearchAgent()

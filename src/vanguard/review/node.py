@@ -17,6 +17,7 @@ from vanguard.state import AgentState
 
 from .defaults import (
     MAX_EVIDENCE_READS,
+    MAX_FOLLOW_UP_WORKERS,
     MAX_REVIEW_ROUNDS,
 )
 from .evidence import read_selected_evidence
@@ -25,6 +26,78 @@ from .prompts import REVIEW_RESEARCH_PROMPT
 
 
 logger = logging.getLogger(__name__)
+
+MAX_REVIEW_SUMMARY_CHARS = 3000
+
+
+REVIEW_SOURCE_FIELDS = {
+    "source_id",
+    "title",
+    "summary",
+    "published_date",
+    "canonical_domain",
+    "source_type",
+    "source_quality",
+    "source_warnings",
+}
+
+
+def slim_source_for_review(source: dict) -> dict:
+    return {key: value for key, value in source.items() if key in REVIEW_SOURCE_FIELDS}
+
+
+def filter_sources_for_review(
+    sources: list[dict],
+    findings: list[dict],
+) -> tuple[list[dict], list[dict], int]:
+    cited_ids = {
+        sid
+        for finding in findings
+        for sid in finding.get("source_ids", [])
+    }
+    eligible = []
+    excluded = []
+
+    for source in sources:
+        if (
+            source["source_id"] in cited_ids
+            and source.get("source_type") != "index_or_feed"
+            and source.get("source_quality") != "low"
+        ):
+            eligible.append(source)
+        else:
+            excluded.append(source)
+
+    return eligible, excluded, len(excluded)
+
+
+def build_excluded_ghost_list(excluded_sources: list[dict]) -> list[dict]:
+    def exclusion_reason(source: dict) -> str:
+        if source.get("source_type") == "index_or_feed":
+            return "index_or_feed"
+        if source.get("source_quality") == "low":
+            return "low_quality"
+        return "uncited"
+
+    return [
+        {
+            "source_id": source["source_id"],
+            "title": source.get("title", ""),
+            "canonical_domain": source.get("canonical_domain", ""),
+            "exclusion_reason": exclusion_reason(source),
+        }
+        for source in excluded_sources
+    ]
+
+
+def truncate_summary_for_review(source: dict) -> dict:
+    summary = source.get("summary")
+    if summary and len(summary) > MAX_REVIEW_SUMMARY_CHARS:
+        return {
+            **source,
+            "summary": summary[:MAX_REVIEW_SUMMARY_CHARS] + "... [truncated]",
+        }
+    return source
 
 
 async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
@@ -36,6 +109,11 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
     model = _review_model(runtime.context)
     backend = filesystem_backend_for_config(runtime.context)
     evidence_snippets: list[dict[str, str | int]] = []
+    review_sources, excluded_sources, excluded_count = filter_sources_for_review(
+        state.get("research_sources", []) or [],
+        state.get("research_findings", []) or [],
+    )
+    excluded_ghost_list = build_excluded_ghost_list(excluded_sources)
     round_number = int(state.get("review_round", 0) or 0) + 1
     logger.info(
         "Starting research review",
@@ -43,6 +121,8 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
             "round": round_number,
             "finding_count": len(state.get("research_findings", []) or []),
             "source_count": len(state.get("research_sources", []) or []),
+            "review_source_count": len(review_sources),
+            "sources_excluded_pre_review_count": excluded_count,
             "evidence_artifact_count": len(state.get("evidence_artifacts", []) or []),
             "max_review_rounds": MAX_REVIEW_ROUNDS,
             "max_evidence_reads": MAX_EVIDENCE_READS,
@@ -53,6 +133,8 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
         model,
         state,
         round_number=round_number,
+        review_sources=review_sources,
+        excluded_ghost_list=excluded_ghost_list,
         evidence_snippets=evidence_snippets,
     )
     requested_evidence = list(evaluation.evidence_to_read)
@@ -89,6 +171,8 @@ async def review_research(state: AgentState, runtime: Runtime[LangGraphConfig]):
             model,
             state,
             round_number=round_number,
+            review_sources=review_sources,
+            excluded_ghost_list=excluded_ghost_list,
             evidence_snippets=evidence_snippets,
         )
 
@@ -129,6 +213,8 @@ async def _evaluate(
     state: AgentState,
     *,
     round_number: int,
+    review_sources: list[dict],
+    excluded_ghost_list: list[dict],
     evidence_snippets: list[dict[str, str | int]],
 ) -> ResearchEvaluation:
     start = perf_counter()
@@ -138,6 +224,8 @@ async def _evaluate(
             "round": round_number,
             "finding_count": len(state.get("research_findings", []) or []),
             "source_count": len(state.get("research_sources", []) or []),
+            "review_source_count": len(review_sources),
+            "sources_excluded_pre_review_count": len(excluded_ghost_list),
             "evidence_snippet_count": len(evidence_snippets),
             "evidence_snippet_characters": sum(
                 int(snippet.get("content_characters", 0)) for snippet in evidence_snippets
@@ -152,13 +240,20 @@ async def _evaluate(
                     research_brief=state.get("research_brief", ""),
                     research_tasks=state.get("research_tasks", []),
                     research_findings=findings_with_ids(state),
-                    research_sources=state.get("research_sources", []),
+                    research_sources={
+                        "sources": [
+                            truncate_summary_for_review(slim_source_for_review(source))
+                            for source in review_sources
+                        ],
+                        "sources_excluded_pre_review": excluded_ghost_list,
+                    },
                     evidence_artifacts=state.get("evidence_artifacts", []),
                     research_feasibility_notes=state.get("research_feasibility_notes", []),
                     source_diversity_notes=state.get("source_diversity_notes", []),
                     search_provider_counts=state.get("search_provider_counts", {}),
                     search_domain_counts=state.get("search_domain_counts", {}),
                     evidence_snippets=evidence_snippets,
+                    max_follow_up_tasks=MAX_FOLLOW_UP_WORKERS,
                 )
             )
         ]
