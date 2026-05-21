@@ -48,6 +48,13 @@ class ResearchEvaluation(BaseModel):
             "coverage and source support; false if important gaps remain."
         )
     )
+    core_brief_answerable: bool | None = Field(
+        default=None,
+        description=(
+            "False only when the core brief cannot be answered at all from available evidence. "
+            "Leave true or unset when a limited, caveated answer is supportable."
+        ),
+    )
     coverage_assessment: str = Field(
         default="",
         description="Brief assessment of whether findings cover the research brief and planned tasks.",

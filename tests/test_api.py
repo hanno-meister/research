@@ -44,6 +44,14 @@ class EvidenceRootCheckingGraph(FakeGraph):
         return await super().ainvoke(graph_input, context=context)
 
 
+class PartialGraph(FakeGraph):
+    async def ainvoke(self, graph_input: dict[str, object], *, context: object):
+        result = await super().ainvoke(graph_input, context=context)
+        result["report_status"] = "partial"
+        result["research_reviews"] = [{"sufficient": False}]
+        return result
+
+
 def test_research_endpoint_maps_request_to_graph_input():
     fake_graph = FakeGraph()
     fake_config = object()
@@ -127,6 +135,20 @@ def test_research_endpoint_verbose_response_includes_debug_state():
     assert body["status"] == "sufficient"
     assert body["debug"]["research_tasks"] == [{"task_id": "task-1", "description": "Task"}]
     assert body["debug"]["research_sources"] == [{"source_id": "S1", "url": "https://example.com"}]
+
+
+def test_research_endpoint_prefers_report_status_partial():
+    fake_graph = PartialGraph()
+    app.dependency_overrides[get_compiled_graph] = lambda: fake_graph
+    app.dependency_overrides[get_runtime_config] = lambda: object()
+
+    try:
+        response = TestClient(app).post("/research", json={"human_message": "Research partial report"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "partial"
 
 
 def test_research_endpoint_uses_temporary_evidence_root_for_copyable_config():

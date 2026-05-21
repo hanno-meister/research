@@ -17,7 +17,7 @@ from .prompts import FINAL_REPORT_PROMPT
 logger = logging.getLogger(__name__)
 
 
-def generate_report_draft(state: AgentState, review, findings, report_sources, runtime) -> ReportDraft:
+def generate_report_draft(state: AgentState, review, findings, report_sources, runtime, *, report_status: str = "sufficient") -> ReportDraft:
     if runtime is None:
         return ReportDraft()
     start = perf_counter()
@@ -42,6 +42,7 @@ def generate_report_draft(state: AgentState, review, findings, report_sources, r
             research_reviews=review,
             required_report_topics=review.get("required_report_topics", []) if isinstance(review, dict) else [],
             coverage_gaps=review.get("coverage_gaps", []) if isinstance(review, dict) else [],
+            report_status=report_status,
             selected_report_sources=list(report_sources.values()),
         )
         response = model.invoke([HumanMessage(content=prompt)])

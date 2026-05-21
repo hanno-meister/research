@@ -220,11 +220,7 @@ def assess_source(source: SourceRecord) -> tuple[str, str, list[str]]:
         domain = (urlparse(url).hostname or "").removeprefix("www.")
     title = _string_field(source, "title").lower()
     path = urlparse(url).path.lower() if url else ""
-    published_date = _string_field(source, "published_date")
-
     warnings: list[str] = []
-    if not published_date:
-        warnings.append("undated")
     if _is_generic_index_page(path, url):
         warnings.append("generic_index_page")
         return "index_or_feed", "low", warnings

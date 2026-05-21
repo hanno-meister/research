@@ -31,11 +31,15 @@ from vanguard.utils.urls import (
     allowed_url_target_contains_target,
     allowed_url_target_matches_url,
     normalize_allowed_url_targets,
-    normalize_domains,
 )
 
 
 logger = logging.getLogger(__name__)
+
+SUMMARY_PROMPT = (
+    "Provide a concise, high-signal summary of the most relevant information. "
+    "Focus on facts, key developments, and useful insights."
+)
 
 
 class SearchGateway:
@@ -63,6 +67,14 @@ class SearchGateway:
 
         policy = policy or SearchPolicy()
         normalized_focused_domains = self._validate_focused_domains(policy, focused_domains)
+        logger.info(
+            "Search gateway policy resolved: providers=%s allowed_domains=%s focused_domains=%s start_date=%s end_date=%s",
+            [provider.name for provider in self.providers],
+            policy.allowed_domains,
+            normalized_focused_domains,
+            policy.start_date.isoformat() if policy.start_date else None,
+            policy.end_date.isoformat() if policy.end_date else None,
+        )
 
         provider_results = await asyncio.gather(
             *(
@@ -196,22 +208,24 @@ class ExaSearchAdapter:
         if policy.end_date:
             kwargs["end_published_date"] = policy.end_date.isoformat()
 
+        logger.info(
+            "Forwarding search request to Exa: include_domains=%s start_published_date=%s end_published_date=%s num_results=%s",
+            kwargs.get("include_domains"),
+            kwargs.get("start_published_date"),
+            kwargs.get("end_published_date"),
+            kwargs.get("num_results"),
+        )
+
         response = await asyncio.to_thread(client.search, query, **kwargs)
         raw_results = _get_field(response, "results", []) or []
         return [self._normalize_result(query, result) for result in raw_results]
 
     def _contents(self, query: str) -> dict[str, Any]:
-        contents: dict[str, Any] = {
-            "highlights": {
-                "max_characters": self.highlights_max_characters,
-                "query": query,
+        return {
+            "summary": {
+                "query": SUMMARY_PROMPT,
             }
         }
-        if self.text_max_characters is not None:
-            contents["text"] = {"maxCharacters": self.text_max_characters}
-        if self.include_summary:
-            contents["summary"] = True
-        return contents
 
     @staticmethod
     def _default_client() -> Any:
@@ -224,17 +238,12 @@ class ExaSearchAdapter:
         return exa_module.Exa(api_key=api_key)
 
     def _normalize_result(self, query: str, result: Any) -> NormalizedSearchResult:
-        highlights = _get_field(result, "highlights", None) or []
-        summary = "\n".join(str(highlight) for highlight in highlights) or _get_field(
-            result, "summary", None
-        )
         return NormalizedSearchResult(
             provider=self.name,
             query=query,
             url=str(_get_field(result, "url", "")),
             title=_get_field(result, "title", None),
-            summary=summary,
-            raw_content=_get_field(result, "text", None),
+            summary=_get_field(result, "summary", None),
             published_date=_get_field(result, "published_date", None)
             or _get_field(result, "publishedDate", None),
         )
@@ -250,7 +259,7 @@ class TavilySearchAdapter:
         client: Any | None = None,
         *,
         max_results: int = 5,
-        search_depth: str = "advanced",
+        search_depth: str = "basic",
         include_raw_content: bool | str = False,
     ) -> None:
         self.client = client
@@ -279,6 +288,16 @@ class TavilySearchAdapter:
             kwargs["start_date"] = policy.start_date.isoformat()
         if policy.end_date:
             kwargs["end_date"] = policy.end_date.isoformat()
+
+        logger.info(
+            "Forwarding search request to Tavily: include_domains=%s start_date=%s end_date=%s max_results=%s search_depth=%s include_raw_content=%s",
+            kwargs.get("include_domains"),
+            kwargs.get("start_date"),
+            kwargs.get("end_date"),
+            kwargs.get("max_results"),
+            kwargs.get("search_depth"),
+            kwargs.get("include_raw_content"),
+        )
 
         response = await asyncio.to_thread(client.search, query, **kwargs)
         raw_results = _get_field(response, "results", []) or []

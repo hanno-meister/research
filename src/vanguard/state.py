@@ -68,6 +68,7 @@ class AgentState(TypedDict):
         search_provider_counts: Latest aggregate accepted-source counts by provider.
         search_domain_counts: Latest aggregate accepted-source counts by domain.
         final_report: Rendered Markdown final or incomplete report.
+        report_status: Final report readiness status: sufficient, partial, or incomplete.
 
     List-valued fields annotated with ``operator.add`` are append-only graph outputs;
     nodes should return lists for those fields so LangGraph can merge them correctly.
@@ -90,6 +91,7 @@ class AgentState(TypedDict):
     search_provider_counts: NotRequired[dict[str, int]]
     search_domain_counts: NotRequired[dict[str, int]]
     final_report: NotRequired[str]
+    report_status: NotRequired[str]
 
 class SupervisorState(TypedDict):
     """State for the supervisor that manages research tasks."""

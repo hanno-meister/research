@@ -25,7 +25,14 @@ async def write_research_brief(state: AgentState, runtime: Runtime[LangGraphConf
     )
     structured_model = model.with_structured_output(ResearchQuestion)
     response = await structured_model.ainvoke(
-        [HumanMessage(content=RESEARCH_BRIEF_PROMPT.format(research_intent=state["research_intent"]))]
+        [
+            HumanMessage(
+                content=RESEARCH_BRIEF_PROMPT.format(
+                    research_intent=state["research_intent"],
+                    selected_lance=_selected_lance_text(state),
+                )
+            )
+        ]
     )
 
     if not isinstance(response, ResearchQuestion):
@@ -33,3 +40,16 @@ async def write_research_brief(state: AgentState, runtime: Runtime[LangGraphConf
 
     logger.info("Generated research brief", extra={"research_brief_characters": len(response.research_brief)})
     return {"research_brief": response.research_brief}
+
+
+def _selected_lance_text(state: AgentState) -> str:
+    lance = state.get("selected_lance") or {}
+    if not isinstance(lance, dict):
+        return "none"
+    parts = [
+        f"id: {str(lance.get('id', '')).strip()}",
+        f"name: {str(lance.get('name', '')).strip()}",
+        f"description: {str(lance.get('description', '')).strip()}",
+    ]
+    text = "\n".join(part for part in parts if not part.endswith(": "))
+    return text or "none"

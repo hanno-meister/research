@@ -1,8 +1,15 @@
 RESEARCH_BRIEF_PROMPT = """You are helping transform a user's research intent into a precise research brief.
+
 User research intent:
 {research_intent}
+
+Selected internal research Lance context, if any:
+{selected_lance}
+
 Write a focused research brief that:
 - preserves the user's original goal
+- uses the selected Lance context to clarify relevance, terminology, and scouting priorities when provided
+- does not replace or narrow the user's request beyond what the user or Lance context supports
 - clarifies what should be investigated
 - lists important dimensions to cover
 - avoids inventing unsupported constraints

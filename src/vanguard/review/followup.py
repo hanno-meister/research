@@ -16,7 +16,6 @@ from vanguard.research.node import (
     ResearchWorkerTask,
     _agent_input,
     _allowed_domains_from_state,
-    _run_research_worker,
     _state_update_from_parts,
     _structured_findings,
     _task_default_query,
@@ -25,7 +24,7 @@ from vanguard.research.node import (
 )
 from vanguard.research.policy import search_context_from_state
 from vanguard.research.recorder import ResearchRunRecorder
-from vanguard.research.defaults import FOLLOW_UP_SEARCH_RESULTS_PER_PROVIDER, MAX_SEARCH_CALLS_PER_WORKER
+from vanguard.research.defaults import FOLLOW_UP_SEARCH_RESULTS_PER_PROVIDER
 from vanguard.state import AgentState
 
 
@@ -109,16 +108,6 @@ async def run_research_worker_with_budget(
     recorder: ResearchRunRecorder,
     max_search_calls: int,
 ) -> ResearchAgentOutput:
-    if max_search_calls == MAX_SEARCH_CALLS_PER_WORKER:
-        return await _run_research_worker(
-            agent=agent,
-            state=state,
-            research_brief=research_brief,
-            task=task,
-            backend=backend,
-            recorder=recorder,
-        )
-
     agent_context = search_context_from_state(
         state,
         research_brief,

@@ -22,6 +22,7 @@ dependencies = [
 pythonpath = [".", "src"]
 
 [tool.vanguard]
+# TODO: Move to settings
 small_model="gpt-5.4-mini"
 large_model="gpt-5.5"
 openai_base_url="https://cop-deep-research.services.ai.azure.com/openai/v1"

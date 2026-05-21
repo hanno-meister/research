@@ -12,6 +12,7 @@ from langgraph.runtime import Runtime
 
 from vanguard.langgraph_configuration import LangGraphConfig
 from vanguard.research.agent import filesystem_backend_for_config
+from vanguard.report_generation.findings import findings_with_ids
 from vanguard.state import AgentState
 
 from .defaults import (
@@ -226,7 +227,7 @@ async def _evaluate(
                     round_number=round_number,
                     research_brief=state.get("research_brief", ""),
                     research_tasks=state.get("research_tasks", []),
-                    research_findings=state.get("research_findings", []),
+                    research_findings=findings_with_ids(state),
                     research_sources=state.get("research_sources", []),
                     evidence_artifacts=state.get("evidence_artifacts", []),
                     research_feasibility_notes=state.get("research_feasibility_notes", []),
@@ -267,6 +268,7 @@ def _review_record(
     return {
         "round": round_number,
         "sufficient": evaluation.sufficient,
+        "core_brief_answerable": evaluation.core_brief_answerable,
         "coverage_assessment": evaluation.coverage_assessment,
         "source_quality_assessment": evaluation.source_quality_assessment,
         "contradiction_notes": evaluation.contradiction_notes,

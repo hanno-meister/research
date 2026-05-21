@@ -878,6 +878,9 @@ async def test_review_research_runs_bounded_follow_up_workers(monkeypatch, tmp_p
         {
             "research_intent": "intent",
             "research_brief": "brief",
+            "allowed_domains": ["example.com"],
+            "start_date": "2026-05-01",
+            "end_date": "2026-05-20",
             "research_findings": [],
             "research_sources": [],
             "evidence_artifacts": [],
@@ -890,6 +893,9 @@ async def test_review_research_runs_bounded_follow_up_workers(monkeypatch, tmp_p
     assert "Find persistence docs" in payload["messages"][0].content
     assert kwargs["context"].search_budget.max_search_calls == 1
     assert kwargs["context"].results_per_provider == 5
+    assert kwargs["context"].search_policy.allowed_domains == ("example.com",)
+    assert kwargs["context"].search_policy.start_date.isoformat() == "2026-05-01"
+    assert kwargs["context"].search_policy.end_date.isoformat() == "2026-05-20"
     assert update["research_findings"] == [
         {
             "task_id": "follow-up-1",
@@ -899,6 +905,45 @@ async def test_review_research_runs_bounded_follow_up_workers(monkeypatch, tmp_p
         }
     ]
     assert len(update["research_reviews"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_follow_up_worker_uses_follow_up_context_when_budget_matches_default(tmp_path):
+    agent = FakeResearchAgent()
+    recorder = research.ResearchRunRecorder()
+    task = review_followup.ResearchWorkerTask(
+        id="follow-up-1",
+        objective="Find focused evidence",
+        focused_domains=("example.com",),
+        expected_output="Evidence.",
+    )
+
+    await review_followup.run_research_worker_with_budget(
+        agent=agent,
+        state=cast(
+            AgentState,
+            {
+                "research_intent": "intent",
+                "research_brief": "brief",
+                "allowed_domains": ["example.com"],
+                "start_date": "2026-05-01",
+                "end_date": "2026-05-20",
+            },
+        ),
+        research_brief="brief",
+        task=task,
+        backend=filesystem_backend_for_config(SimpleNamespace(evidence_root=tmp_path)),
+        recorder=recorder,
+        max_search_calls=2,
+    )
+
+    assert len(agent.calls) == 1
+    _payload, kwargs = agent.calls[0]
+    assert kwargs["context"].focused_domains == ("example.com",)
+    assert kwargs["context"].search_budget.max_search_calls == 2
+    assert kwargs["context"].results_per_provider == 5
+    assert kwargs["context"].search_policy.start_date.isoformat() == "2026-05-01"
+    assert kwargs["context"].search_policy.end_date.isoformat() == "2026-05-20"
 
 
 def test_follow_up_worker_tasks_treats_focused_domains_as_hints():
@@ -995,7 +1040,7 @@ def test_final_report_filters_caveats_and_promotes_follow_up_findings():
     assert "Reducers support parallel state merging." in report
     assert "Plan-and-execute should be framed as archival" in report
     assert "Plan-and-execute is an official current LangGraph pattern." not in report
-    assert "## Sources" in report
+    assert "## Selected Sources" in report
     assert "Lower-confidence, contradictory, or insufficiently supported items were omitted" not in report
     assert "S24 is mismatched" not in report
     assert "Raw evidence inspected for S24" not in report
@@ -1068,6 +1113,72 @@ def test_incomplete_report_is_concise_public_and_omits_evidence_paths():
     assert "Check primary filings." in report
     assert "S1" not in report
     assert "/evidence/" not in report
+
+
+def test_insufficient_review_with_usable_evidence_renders_partial_report():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_findings": [
+                {"summary": "Supported caveated trend finding.", "source_ids": ["S1"]},
+            ],
+            "research_sources": [
+                {"source_id": "S1", "title": "Useful source", "url": "https://example.com/source", "canonical_domain": "example.com"},
+            ],
+            "research_reviews": [
+                {
+                    "sufficient": False,
+                    "coverage_assessment": "Enough evidence for a caveated synthesis, but named systems remain undercovered.",
+                    "source_quality_assessment": "Sources are useful but incomplete.",
+                    "coverage_gaps": ["Missing primary evidence for named systems."],
+                    "selected_report_sources": [{"source_id": "S1", "status": "use", "reason": "supports trend"}],
+                    "selected_report_findings": [{"finding_id": "F1", "status": "use", "reason": "supported"}],
+                }
+            ],
+        }
+    )
+
+    report = update["final_report"]
+    assert update["report_status"] == "partial"
+    assert not report.startswith("# Research Incomplete")
+    assert "> Partial report: Enough evidence for a caveated synthesis" in report
+    assert "Supported caveated trend finding." in report
+    assert "## Confidence and Gaps" in report
+    assert "Missing primary evidence for named systems." in report
+
+
+def test_core_unanswerable_review_stays_incomplete_even_with_evidence():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_findings": [{"summary": "Some finding.", "source_ids": ["S1"]}],
+            "research_sources": [{"source_id": "S1", "title": "Source", "canonical_domain": "example.com"}],
+            "research_reviews": [
+                {
+                    "sufficient": False,
+                    "core_brief_answerable": False,
+                    "selected_report_sources": [{"source_id": "S1", "status": "use", "reason": "ok"}],
+                }
+            ],
+        }
+    )
+
+    assert update["report_status"] == "incomplete"
+    assert update["final_report"].startswith("# Research Incomplete")
+
+
+def test_required_topics_alone_do_not_create_partial_report():
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_findings": [],
+            "research_sources": [],
+            "research_reviews": [{"sufficient": False, "required_report_topics": ["Topic"]}],
+        }
+    )
+
+    assert update["report_status"] == "incomplete"
+    assert update["final_report"].startswith("# Research Incomplete")
 
 
 def test_prompts_include_general_source_quality_invariants():
@@ -1254,8 +1365,10 @@ def test_final_report_preserves_finding_order_without_heuristic_text_filtering()
     report = update["final_report"]
     assert report.startswith("# Trend Report: World Generation Models for Spatial Computing")
     assert "## Summary" in report
-    assert "- Recent newsletter coverage says NVIDIA is using AI to design chips." in report
-    assert "- Reuters reported NVIDIA would invest up to $2.1B in IREN as part of an AI data-center deal." in report
+    assert "### Recent newsletter coverage says NVIDIA is using AI" in report
+    assert "Recent newsletter coverage says NVIDIA is using AI to design chips." in report
+    assert "### Reuters reported NVIDIA would invest up to $2.1B" in report
+    assert "Reuters reported NVIDIA would invest up to $2.1B in IREN as part of an AI data-center deal." in report
     assert "https://www.deeplearning.ai/the-batch/issue-352" in report
     assert "https://blogs.nvidia.com/feed/" in report
     assert "https://www.reuters.com/business/nvidia-invest-iren-2026-05-07/" in report
@@ -1301,7 +1414,7 @@ def test_final_report_keeps_overlapping_findings_and_uses_public_citations():
     assert report.startswith("# Trend Report: World Generation Models for Spatial Computing")
     assert "The company launched a new platform for enterprise customers." in report
     assert "The company launched a new enterprise platform" in report
-    assert "Sources: https://example.com/launch" in report
+    assert "Source: https://example.com/launch" in report
     assert "[1]" not in report
     assert "Official launch post" in report
     assert "S1" not in report
@@ -1327,7 +1440,7 @@ def test_final_report_key_takeaways_populate_when_draft_is_empty():
     report = update["final_report"]
     assert "## Summary" in report
     assert "No high-confidence findings were available." not in report
-    assert "## Sources" in report
+    assert "## Selected Sources" in report
 
 
 def test_final_report_selected_sources_are_numbered_and_uncapped():
@@ -1419,7 +1532,7 @@ def test_final_report_contiguous_source_numbering_skips_unused_and_excluded_sour
     assert "One (example.com)" in report
     assert "Three (example.com)" in report
     assert "[3]" not in report
-    assert "## Sources" in report
+    assert "## Selected Sources" in report
     assert "One (example.com)" in report
     assert "Three (example.com)" in report
 
@@ -1499,24 +1612,40 @@ def test_final_report_sources_render_clickable_links():
 
 def test_final_report_top_sections_render_direct_source_urls(monkeypatch):
     from vanguard.report_generation import node as report_node
-    from vanguard.report_generation.models import ReportDraft, ReportSectionDraft
+    from vanguard.report_generation.models import CitedText, ReportDraft, ReportSectionDraft, TeamSuggestionDraft, WhyItMattersDraft
 
     monkeypatch.setattr(
         report_node,
         "generate_report_draft",
         lambda *args, **kwargs: ReportDraft(
             executive_summary=ReportSectionDraft(
-                summary="Summary claim.", source_ids=["S1"]
+                paragraphs=[
+                    CitedText(text="Summary claim one.", source_ids=["S1", "S2", "S3"]),
+                    CitedText(text="Summary claim two.", source_ids=["S2"]),
+                ]
             ),
-            limitations=ReportSectionDraft(
-                summary="Why it matters claim.", source_ids=["S2"]
+            why_it_matters=WhyItMattersDraft(
+                for_lance=[CitedText(text="Lance-specific why it matters.", source_ids=["S2"])],
+                for_firm=[CitedText(text="Firm-wide why it matters.", source_ids=["S3"])],
             ),
             key_findings=ReportSectionDraft(
-                bullets=["Trend bullet."], source_ids=["S1", "S3"]
+                cited_bullets=[CitedText(text="Trend bullet.", source_ids=["S1", "S3"])]
             ),
-            next_steps=ReportSectionDraft(
-                bullets=["Team suggestion."], source_ids=["S2"]
-            ),
+            team_suggestions=[
+                TeamSuggestionDraft(
+                    action="Run a focused pilot.",
+                    owner_role="Spatial AI Lead",
+                    pilot="Build a scoped prototype without links https://example.com/bad",
+                    target_timing="4-6 weeks",
+                    effort="M",
+                    required_skills=["3D generation", "XR prototyping"],
+                    dependencies="Tool access and sample scenes https://example.com/bad",
+                    risk_and_mitigations="Risk of weak model output; mitigate with fixed prompts.",
+                    success_metric="Reusable benchmark scorecard completed.",
+                    related_technology="3D Gaussian Splatting",
+                    source_ids=["S2", "S3"],
+                )
+            ],
         ),
     )
 
@@ -1540,12 +1669,53 @@ def test_final_report_top_sections_render_direct_source_urls(monkeypatch):
     )
 
     report = update["final_report"]
-    assert "Summary claim. Source: https://example.com/one" in report
-    assert "Why it matters claim. Source: https://example.com/two" in report
-    assert "- Trend bullet. Sources: https://example.com/one, https://example.com/three" in report
-    assert "- Team suggestion. Source: https://example.com/two" in report
+    assert "Summary claim one. Sources: https://example.com/one, https://example.com/two, https://example.com/three" in report
+    assert "Summary claim two. Source: https://example.com/two" in report
+    assert "### For the Selected Lance" in report
+    assert "Lance-specific why it matters. Source: https://example.com/two" in report
+    assert "### For the IT Consulting Firm" in report
+    assert "Firm-wide why it matters. Source: https://example.com/three" in report
+    assert "### Trend bullet" in report
+    assert "Trend bullet. Sources: https://example.com/one, https://example.com/three" in report
+    assert "### 1. Run a focused pilot." in report
+    assert "| Owner role | Spatial AI Lead |" in report
+    assert "https://example.com/bad" not in report
     assert "[1]" not in report
     assert re.search(r"\bS\d+\b", report) is None
+
+
+def test_final_report_caps_urls_per_claim_and_keeps_sources_list_uncapped(monkeypatch):
+    from vanguard.report_generation import node as report_node
+    from vanguard.report_generation.models import CitedText, ReportDraft, ReportSectionDraft
+
+    monkeypatch.setattr(
+        report_node,
+        "generate_report_draft",
+        lambda *args, **kwargs: ReportDraft(
+            executive_summary=ReportSectionDraft(
+                paragraphs=[CitedText(text="Many-source claim.", source_ids=["S1", "S2", "S3", "S4"])]
+            ),
+        ),
+    )
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_findings": [
+                {"summary": f"Finding {i}.", "source_ids": [f"S{i}"]}
+                for i in range(1, 5)
+            ],
+            "research_sources": [
+                {"source_id": f"S{i}", "title": f"Source {i}", "url": f"https://example.com/{i}", "canonical_domain": "example.com"}
+                for i in range(1, 5)
+            ],
+            "research_reviews": [{"sufficient": True}],
+        }
+    )
+
+    report = update["final_report"]
+    assert "Many-source claim. Sources: https://example.com/1, https://example.com/2, https://example.com/3" in report
+    assert "Many-source claim. Sources: https://example.com/1, https://example.com/2, https://example.com/3, https://example.com/4" not in report
+    assert "[Source 4](https://example.com/4)" in report
 
 
 def test_final_report_body_uses_direct_source_urls_not_numeric_citations():
@@ -1566,6 +1736,65 @@ def test_final_report_body_uses_direct_source_urls_not_numeric_citations():
     report = update["final_report"]
     assert re.search(r"\[\d+\]", report) is None
     assert "Sources: https://example.com/one, https://example.com/two" in report
+
+
+def test_final_report_uses_prose_first_rendering_for_analysis_sections(monkeypatch):
+    from vanguard.report_generation import node as report_node
+    from vanguard.report_generation.models import CitedText, ReportDraft, ReportSectionDraft
+
+    monkeypatch.setattr(
+        report_node,
+        "generate_report_draft",
+        lambda *args, **kwargs: ReportDraft(
+            executive_summary=ReportSectionDraft(
+                paragraphs=[CitedText(text="Summary paragraph with evidence.", source_ids=["S1"])]
+            ),
+            key_findings=ReportSectionDraft(
+                cited_bullets=[
+                    CitedText(text="Technology Alpha is maturing quickly. It matters for spatial workflows.", source_ids=["S1"]),
+                    CitedText(text="Technology Beta remains earlier-stage. Evidence is narrower.", source_ids=["S2"]),
+                ]
+            ),
+            limitations=ReportSectionDraft(
+                paragraphs=[CitedText(text="Evidence is uneven across vendors.", source_ids=["S2"])]
+            ),
+        ),
+    )
+    update = final_report_generation(
+        {
+            "research_intent": "intent",
+            "research_findings": [
+                {"summary": "Technology Alpha is maturing quickly.", "source_ids": ["S1"]},
+                {"summary": "Technology Beta remains earlier-stage.", "source_ids": ["S2"]},
+            ],
+            "research_sources": [
+                {"source_id": "S1", "title": "Alpha source", "url": "https://example.com/alpha", "canonical_domain": "example.com"},
+                {"source_id": "S2", "title": "Beta source", "url": "https://example.com/beta", "canonical_domain": "example.com"},
+            ],
+            "research_reviews": [
+                {
+                    "sufficient": True,
+                    "source_quality_assessment": "Primary coverage is good.",
+                    "coverage_gaps": ["Benchmark coverage is thin."],
+                }
+            ],
+            "source_diversity_notes": ["Most sources come from one domain."],
+        }
+    )
+
+    report = update["final_report"]
+    trending = report.split("## Trending Technologies", 1)[1].split("## Team Suggestions", 1)[0]
+    confidence = report.split("## Confidence and Gaps", 1)[1].split("## Selected Sources", 1)[0]
+
+    assert "### Technology Alpha is maturing quickly" in trending
+    assert "Technology Alpha is maturing quickly. It matters for spatial workflows. Source: https://example.com/alpha" in trending
+    assert "### Technology Beta remains earlier-stage" in trending
+    assert "\n- Technology Alpha" not in trending
+    assert "\n- Technology Beta" not in trending
+    assert "Primary coverage is good. Benchmark coverage is thin. Most sources come from one domain." in confidence
+    assert "\n- Primary coverage" not in confidence
+    assert "## Selected Sources" in report
+    assert "- 1. [Alpha source](https://example.com/alpha)" in report
 
 
 def test_final_report_marble_claim_uses_marble_and_worldact_urls_only():
@@ -1644,7 +1873,7 @@ def test_recorder_adds_lightweight_source_assessment_metadata():
     index_source, news_source = recorded
     assert index_source["source_type"] == "index_or_feed"
     assert index_source["source_quality"] == "low"
-    assert index_source["source_warnings"] == ["undated", "generic_index_page"]
+    assert index_source["source_warnings"] == ["generic_index_page"]
     assert news_source["source_type"] == "source"
     assert news_source["source_quality"] == "high"
     assert news_source["source_warnings"] == []

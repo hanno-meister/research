@@ -163,6 +163,9 @@ async def run_research(
 
 
 def _research_status(result: dict[str, object]) -> str:
+    report_status = result.get("report_status")
+    if report_status in {"sufficient", "partial", "incomplete"}:
+        return str(report_status)
     reviews = result.get("research_reviews")
     if not isinstance(reviews, list) or not reviews:
         return "unreviewed"

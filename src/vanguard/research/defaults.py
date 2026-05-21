@@ -14,7 +14,7 @@ def default_search_gateway(*, results_per_provider: int = INITIAL_SEARCH_RESULTS
             ExaSearchAdapter(num_results=results_per_provider, highlights_max_characters=1_000),
             TavilySearchAdapter(
                 max_results=results_per_provider,
-                search_depth="advanced",
+                search_depth="basic",
                 include_raw_content="markdown",
             ),
         ]
