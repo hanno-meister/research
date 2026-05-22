@@ -13,7 +13,9 @@ Write a focused research brief that:
 - preserves the user's original goal exactly as stated, separating what the user explicitly asked for from reasonable inferred research dimensions
 - uses the selected Lance context to clarify relevance, terminology, and scouting priorities when provided
 - when the Lance context names specific systems, models, or platforms, treats those as required coverage targets — use "must investigate" or "required coverage" rather than "such as" or "including but not limited to"
+- for each required coverage target, specifies what kind of primary source evidence is expected: API or developer documentation for products with a programmatic surface, official product or architecture documentation for platforms and infrastructure systems, comparative capability evidence or third-party evaluation for categories where direct primary sources are unlikely to consolidate the relevant claims, and peer-reviewed or preprint research for academic or benchmark systems
 - if a date window is provided, states it explicitly as a research constraint and instructs that sources outside the window should be flagged rather than silently used
+- distinguishes between required coverage targets and required coverage categories: a target is a named system that must be investigated directly; a category is a broader area where the brief should specify what questions remain unanswerable if coverage of that category is missing
 - does not add research dimensions that are not supported by the user's intent or Lance context — if a dimension is inferred rather than explicit, mark it as inferred
 - does not replace or narrow the user's request beyond what the user or Lance context supports
 - notes uncertainty or missing scope instead of filling gaps with assumptions
