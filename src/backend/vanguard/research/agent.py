@@ -15,6 +15,10 @@ from .models import ResearchAgentContext, ResearchAgentOutput
 from .tools import search_gateway
 
 
+REPO_ROOT = Path(__file__).parents[3]
+DEFAULT_EVIDENCE_ROOT = REPO_ROOT / ".vanguard"
+
+
 RESEARCH_AGENT_SYSTEM_PROMPT = """You are a constrained research worker inside a larger LangGraph workflow.
 
 Rules:
@@ -50,7 +54,10 @@ def create_research_agent(config: LangGraphConfig, backend: CompositeBackend | N
 
 
 def filesystem_backend_for_config(config: Any | None = None) -> CompositeBackend:
-    evidence_root = Path(getattr(config, "evidence_root", None) or ".vanguard").resolve()
+    configured_root = getattr(config, "evidence_root", None)
+    evidence_root = Path(configured_root) if configured_root else DEFAULT_EVIDENCE_ROOT
+    if not evidence_root.is_absolute():
+        evidence_root = REPO_ROOT / evidence_root
     return CompositeBackend(
         default=StateBackend(),
         routes={

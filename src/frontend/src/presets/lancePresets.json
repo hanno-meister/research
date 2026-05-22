@@ -1,0 +1,302 @@
+[
+  {
+    "id": "accrl",
+    "name": "Biological Computing with Cortical Labs",
+    "description": "Perform experimentation on a real Biologic Computing powered by human neurons with Cortical Labs."
+  },
+  {
+    "id": "acpho",
+    "name": "Photonic Matrix Compute Simulation with Analog Optical Computing",
+    "description": "Investigating photonic and optical computing approaches for high-speed, energy-efficient AI processing, exploring light-based neural networks and optical matrix operations for next-generation computing architectures."
+  },
+  {
+    "id": "acqhv",
+    "name": "Hybrid Quantum-HPC Service Demand and Use-Case Validation",
+    "description": "Investigate potential demand of supercomputing services and benefits of new installations (like the new Quantum-/Supercomputing unit at the Munich Leibniz Rechenzentrum)."
+  },
+  {
+    "id": "acqts",
+    "name": "Quantum Machine Learning for Time Series",
+    "description": "Investigating quantum computing technologies for AI acceleration, finance, and data science applications and taking part in public funding projects collab."
+  },
+  {
+    "id": "acspn",
+    "name": "Neuromorphic Computing with SpiNNcloud Spiking Neural Networks",
+    "description": "Researching neuromorphic computing for biologically-inspired AI systems and advanced computational models focusing on practical application and industry partners."
+  },
+  {
+    "id": "apcua",
+    "name": "Validate agents for computer use automation",
+    "description": "Developing testing frameworks and methodologies to validate AI agents designed for computer interaction, ensuring reliability, security, and performance of autonomous systems that can navigate and operate computer interfaces."
+  },
+  {
+    "id": "apsas",
+    "name": "Experiment with Service as a Software approach using AI agents for Process automation",
+    "description": "Exploring service-oriented architectures that deliver business process automation capabilities as modular, cloud-native services, enabling rapid deployment and scaling of automation solutions across enterprise environments."
+  },
+  {
+    "id": "dhapr",
+    "name": "Digital Human appearance evolution 2D and 3D",
+    "description": "Research and implementation of digital humans based on 2D/3D technologies, fully body, with animations and natural behaviors triggered based on use cases."
+  },
+  {
+    "id": "dhbrn",
+    "name": "Digital Human brain evolution",
+    "description": "This practice is focused on the development of the backend of digital humans, which is the brain that allows these agents to be used with different modules depending on the use case."
+  },
+  {
+    "id": "dhcld",
+    "name": "Digital Human cloud solution",
+    "description": "This practice is focused on porting all the graphic and backend solutions to the cloud in order to guarantee low latency and portability/scalability of the Digital Human solution."
+  },
+  {
+    "id": "dhihr",
+    "name": "Interaction based humanoid robots",
+    "description": "Exploring humanoid social robotics systems like Ameca and scouting for new robots like Furhat, Real Robotics."
+  },
+  {
+    "id": "eabft",
+    "name": "Versatile Bias & Fairness Checker in Tabular Data in the context of Ethical AI",
+    "description": "Build a tool that identifies bias in tabular data and prediction results that might result in unfairness"
+  },
+  {
+    "id": "eabll",
+    "name": "Bias detection in LLMs tool in the context of Ethical AI",
+    "description": "Build a tool that identifies bias containment in existing LLMs along different attributes"
+  },
+  {
+    "id": "eafal",
+    "name": "Fair Labelling tool using Active Learning in the context of Ethical AI",
+    "description": "Build a tool that smartly guides users in labelling their dataset using Active Learning"
+  },
+  {
+    "id": "eafet",
+    "name": "Ethical AI Evaluation tool (FETS) for developers",
+    "description": "Create a GenAI agent for developers able to understand the requirements, metrics for Fairness, Explainability, Transparency, Safety and evaluate the implementation of Ethical AI principles (especially - Fairness, Explainability, Transparency, Safety) are existing in the source code and give a report on the evaluation along with recommendations."
+  },
+  {
+    "id": "eaorc",
+    "name": "Agent for risk classification as per frameworks like OECD in the context of Ethical AI",
+    "description": "Create a GenAI agent able to understand the requirements of frameworks like OECD and assess the compliance of an existing implementation with those requirements"
+  },
+  {
+    "id": "earas",
+    "name": "Responsible AI agent for risk assessment",
+    "description": "Create a GenAI agent able to compare an AI Policy with the EU AI Act, understand additional requirements and assess the compliance of an existing implementation with those requirements"
+  },
+  {
+    "id": "fsamf",
+    "name": "Agentic solution Monitoring Framework in Fins",
+    "description": "Development of a monitoring framework for agents embedded in chatbot solutions designed to support end clients or branch/back-office operators. The framework relies on LLM-as-a-judge assistants that analyze user–agent conversations, summarize satisfaction levels, and produce synthetic KPIs to enable tuning and behavioral expansion of the controlled agent."
+  },
+  {
+    "id": "fscmd",
+    "name": "Credit Monitoring Data Watch",
+    "description": "Activation of an observatory aimed at identifying and using data sources useful for model tuning to support monitoring activities — from early-warning to non-performing credit management — assessing new open-data sources and unstructured data that can be synthesized through agentic solutions."
+  },
+  {
+    "id": "fsesi",
+    "name": "Enhanced Supervisory interaction",
+    "description": "Design of co-agents supporting banks in supervisory dialogue. The GenAI agent assists Risk, Compliance, and Regulatory Affairs teams in efficiently managing interactions with supervisory authorities (ECB, Bank of Italy, etc.), automating document reading, classification, and drafting of responses to inspection findings or requests for clarification. Using document understanding, retrieval, and regulatory reasoning techniques, the agent: analyzes documents received from the supervisor (SREP letters, clarifications, thematic reports); identifies regulatory requirements and critical points linked to internal bank processes; retrieves relevant information from corporate repositories (policies, procedures, KPIs, audit trails); generates draft responses or action plans consistent with regulation and prior dialogues; maintains a full audit trail to ensure traceability and transparency."
+  },
+  {
+    "id": "fsgob",
+    "name": "GenAI Onboarding Strategies for Financial Service",
+    "description": "Refine the blueprint generation approach (Webinar 21.06.25) by applying it to real client use cases and extending ready-to-use checklists to complete all template components."
+  },
+  {
+    "id": "fskbo",
+    "name": "Financial Knowledge base optimization",
+    "description": "Implementation of a framework to analyze the Knowledge Base, track redundancies, inconsistencies, and complexity that might mislead agent-based assistants, and recommend remediation actions to optimize the documentation and information base."
+  },
+  {
+    "id": "fmobv",
+    "name": "Observatory on Applied AI Best Practices",
+    "description": "Providing regular reports on AI tools and best practices tailored for different organizational roles and functions. This observatory tracks, evaluates, and recommends the latest AI platforms and applications across productivity, management, development, and specialized domains, focusing on practical implementation guidance, operational considerations including licensing models, cost structures, and group-wide OPEX implications. Deliverables include role-specific AI tool assessments, implementation playbooks, vendor evaluation frameworks, and cost-benefit analyses to enable informed decision-making for managers and teams adopting AI solutions in their workflows."
+  },
+  {
+    "id": "fmsfa",
+    "name": "Embodied Multimodal Sensor Fusion for Real-World Autonomy",
+    "description": "Exploring AI systems that perceive, understand, and interact with the physical world through integrated sensory capabilities. This Squad focuses on embodied intelligence - AI integrated into physical systems like robots, autonomous vehicles, and smart environments that can sense, reason, and act in real-world scenarios. Key research areas include multimodal sensor fusion (computer vision, LiDAR, haptic feedback, audio processing), real-time environmental understanding, and adaptive behavior learning through physical interaction."
+  },
+  {
+    "id": "fmssi",
+    "name": "Agentic Systems Pathways Toward Scalable Superintelligence",
+    "description": "Researching pathways to artificial general intelligence (AGI) and superintelligence, exploring multi-modal reasoning, self-improving systems, and the technical and safety challenges involved in developing human-level and beyond AI capabilities. While true superintelligence remains in early research phases, this Squad also examines concrete implementations of collaborative AI agents serving as stepping stones toward more sophisticated autonomous systems, providing valuable insights into coordination mechanisms, emergent behaviors, and scalability challenges that inform the broader superintelligence research agenda."
+  },
+  {
+    "id": "gmdaw",
+    "name": "AI music integration in DAW systems",
+    "description": "Integrating AI-powered composition, arrangement, and production tools directly into Digital Audio Workstation (DAW) workflows, enabling seamless collaboration between human creativity and AI-generated musical elements."
+  },
+  {
+    "id": "gmobv",
+    "name": "Observatory on AI Audio and Music models",
+    "description": "Applying Gen AI for creating branded audio content, soundtracks, and personalized audio experiences like podcasts. But also sound FX."
+  },
+  {
+    "id": "gmprl",
+    "name": "Procedural, Realtime, Live Music production",
+    "description": "Developing AI systems for real-time, algorithmic music generation and live performance, creating adaptive soundscapes that respond to audience interaction, environmental factors, or performer input during live events."
+  },
+  {
+    "id": "gsmcw",
+    "name": "Technical Guidelines for Machine-Consumable Websites",
+    "description": "Defining technical standards so websites are machine-consumable: first-party knowledge bases, structured data/schema, fresh and citable content, and explicit controls for AI crawlers (robots, allow/deny). Including accessibility and crawlability testing criteria."
+  },
+  {
+    "id": "gsmon",
+    "name": "Monetization Pathways for Generative Search",
+    "description": "Studying and mapping future revenue models for AI search, subscriptions and APIs vs. direct sales, advertising, data licensing, and hybrids, to anticipate product, pricing, and go-to-market implications and define scenario playbooks."
+  },
+  {
+    "id": "gsrdt",
+    "name": "Reddit & Community Data in Training and Retrieval",
+    "description": "Evaluating Reddit/community conversations as high-value data for training and retrieval: opportunities (more human responses, real-time insight, UGC as citable sources) and risks (brand safety, usage rights, community bias, reputation). Defining participation guidelines, LLM-ready social listening, and policies on licensing and moderation."
+  },
+  {
+    "id": "gvobv",
+    "name": "Testing newest AI based Video generation tools",
+    "description": "Exploring Gen AI for Text-to-Image and Video applications, including character consistency, panoramas, and environments."
+  },
+  {
+    "id": "gvvpw",
+    "name": "AI-Driven Video Production Workflow - Mapping, Prototyping, and Efficiency Case Study",
+    "description": "Analyzing how AI technologies are transforming traditional video production workflows, from automated editing and color grading to AI-assisted cinematography and post-production optimization for modern content creation. Potentially employing agentic systems for quality control and automatic evaluation."
+  },
+  {
+    "id": "vcavg",
+    "name": "Custom AI Voice Generation",
+    "description": "Create a comprehensive framework for designing, generating, and customizing high-quality, brand-aligned AI voices in corporate learning context. The goal is to support both prompt-based voice generation and interface-based voice customization without prompting."
+  },
+  {
+    "id": "vcmpg",
+    "name": "Multi-Speaker Podcast Generation",
+    "description": "Develop a system that transforms short learning units into engaging multi-speaker podcast dialogues using LLMs and synthetic voices. The goal is to improve learner engagement by converting static educational content into conversational audio formats."
+  },
+  {
+    "id": "vcmut",
+    "name": "Multi-User orchestration Teacher Agent",
+    "description": "Develop an AI system that can manage multi-participant voice interactions in virtual learning settings. The system should handle two contexts: users sitting together in one physical space and users joining from different locations. The goal is to enable accurate speaker identification, smooth turn-taking, and an AI trainer role guiding the session in the corporate learning context."
+  },
+  {
+    "id": "vcvac",
+    "name": "Voice & Conversational affective computing",
+    "description": "Working in collaboration with the research group at the Berlin Polytechnical University (TUB), the Squad members will explore the possibilities of combining semantic and biometric affective computing methods. The goal is to implement a multichannel application to more accurately measure emotions in learning application."
+  },
+  {
+    "id": "issai",
+    "name": "Bootcamp Module - Sustainable AI Practices",
+    "description": "Develop a practical, hands-on AI module that teaches developers how to use, build, and operate applications that integrate AI in a more environmentally responsible way. Provide know-how, best practices, and examples to help teams understand the footprint of AI and apply greener alternatives in real projects. The focus is particularly on generative AI."
+  },
+  {
+    "id": "isbdl",
+    "name": "Bootcamp Delivery - Internal & Customer Sessions",
+    "description": "Deliver Green Tech Bootcamp sessions (existing modules + new additions) for internal teams and external customers. Adapt the content to their specific technology stack, maturity, and sustainability goals to maximize relevance and impact."
+  },
+  {
+    "id": "isbfe",
+    "name": "Bootcamp Format Evolution - Modular, Hybrid & Online Delivery",
+    "description": "Extend the Green Tech Bootcamp into flexible delivery formats (modular sessions, hybrid formats, remote options) that reduce the time commitment for external and internal customers while keeping the experience highly interactive, hands-on, and motivating for developers."
+  },
+  {
+    "id": "iseco",
+    "name": "IT Environmental Impact & Measurement – Eco Analyzer Tool - DevOps Integration",
+    "description": "Test and validate a prototype tool (developed by Squad members in 2024/2025) that integrates environmental impact metrics and an AI coding coach into the DevOps pipeline. Assess how it performs in a real development project and whether it genuinely helps developers improve the environmental footprint of their code."
+  },
+  {
+    "id": "isifr",
+    "name": "IT Environmental Impact & Measurement – Impact Framework (GSF IF)",
+    "description": "Explore and test the Green Software Foundation's Impact Framework (IF) in practice by applying it to a mock/real application. Generate both theoretical insights and practical evidence to understand its usefulness, limitations, and integration potential in real-life software development."
+  },
+  {
+    "id": "issia",
+    "name": "State of Sustainable IT Adoption – Industry & Reply Insights",
+    "description": "Analyse where the industry stands in the adoption of sustainable IT practices, identify barriers and motivators, and evaluate whether companies are actually improving or simply shifting focus. Create a data-driven, realistic view on the maturity of Green IT (and compare this with Reply's current position)."
+  },
+  {
+    "id": "nwntn",
+    "name": "Agentic AI for NTN Vertical Use Cases",
+    "description": "To develop pilot projects and end-to-end demonstrations with final customers that validate the use of agentic AI for orchestration, automation, and optimization of NTN vertical applications (i.e. via re-using of some IPCEI CIS modules). The focus is on deploying business solutions, providing measurable value across NTN target markets such as mobility, logistics, defense, and smart cities."
+  },
+  {
+    "id": "rbrmf",
+    "name": "Open RMF evolution",
+    "description": "This practice aims to build on the Open RMF solution developed by Reply in 2025 and adapt it to the 2026 evolutions of the Open RMF community."
+  },
+  {
+    "id": "rbrvr",
+    "name": "Roboverse Platform Robots integration",
+    "description": "All the features currently available with the existing robots will be extended to other robots."
+  },
+  {
+    "id": "rbswr",
+    "name": "Swarm Robotics with tiny robots for warehouses",
+    "description": "To research and study the state of the art of SWARM Robotics to date, that is, the coordination of multiple robotic agents that contribute to the completion of a choreographed mission."
+  },
+  {
+    "id": "rbtel",
+    "name": "Humanoids Teleoperation",
+    "description": "Study and develop essential modules for teleoperating humanoid robots, with visors, remote controls, sensorized suits, and models that use images captured by external cameras to film an operator and control the robot's movements in real time. Recording teleoperation datasets for each humanoid robot will be essential. These datasets will be used as an evolution of this practice, to train specific policies that will lead to the robot's autonomy in singular tasks."
+  },
+  {
+    "id": "rbwbc",
+    "name": "Humanoids Whole Body Control",
+    "description": "Study and develop the essential modules for achieving full control of humanoid robots. The modules will include basic controls for human safety, locomotion, low-level control of individual motors, and access to onboard sensors."
+  },
+  {
+    "id": "sdaqv",
+    "name": "Agent Quality and Behavior Validation",
+    "description": "To define, evaluate, and continuously ensure the quality and reliability of agent behavior across the lifecycle — from research and experimentation to deployment. The team's focus is to translate abstract expectations of \"good agent behavior\" into measurable standards, tools, and processes that ensure consistent, safe, and high-quality user experiences."
+  },
+  {
+    "id": "sdlpg",
+    "name": "Densifying Repository Context for AI Agents Using Labeled Property Graphs",
+    "description": "This research project explores how labeled property graphs can densify and structure contextual information for AI agents operating across large-scale software repositories. By representing code, dependencies, documentation, and development artifacts as a knowledge graph, we enable AI agents to dynamically prune irrelevant context, improving precision, scalability, and decision-making in tasks like code generation, bug detection, and automated testing."
+  },
+  {
+    "id": "sdobv",
+    "name": "Observatory on Commercial SDLC tools",
+    "description": "Run an observatory on the commercial tools that are popping up here and there providing support on the Software Development Lifecycle. I think we can combine both (Observatory + REPLY PoV) in a new Squad."
+  },
+  {
+    "id": "sdsit",
+    "name": "Dealing with shadow IT in the GenAI era",
+    "description": "Vibe-coding is becoming more and more an enabler for many employees inside of enterprise companies. This leads to a fragmentation and explosion of little helper tools. Explore emerging platforms, best practices and cases for handling maintainability, security, trust and working in the constraints of the enterprise settings while keeping employees engaged."
+  },
+  {
+    "id": "scftm",
+    "name": "Fine tune pre-trained 3D models",
+    "description": "Adapting large pre-trained 3D AI models (generative \"foundation models\") to specific industry use cases. This Squad experiments with fine-tuning existing 3D models to incorporate domain-specific data and requirements, improving accuracy for tasks like product design, architectural visualization, engineering, and manufacturing."
+  },
+  {
+    "id": "scobv",
+    "name": "Observatory on Generative 3D Content Creation",
+    "description": "Automating the evaluation pipeline for 3D generative models from model discovery to benchmark execution to report generation, reducing manual effort while maintaining rigor. This Squad builds an agentic system that continuously tracks, downloads, benchmarks, and reports on emerging 3D AI models."
+  },
+  {
+    "id": "scsem",
+    "name": "Spatial Semantics & Scene Graphs",
+    "description": "Build a reliable pipeline to classify objects in 3D data like USD scenes and expose a queryable scene graph for downstream natural-language commands (e.g., \"select all shelves\")."
+  },
+  {
+    "id": "scwrd",
+    "name": "Generative 3D World Models & Spatial Intelligence",
+    "description": "Exploring and integrating emerging world generation models to create consistent, explorable 3D environments from multimodal inputs (text, images, gestures). This Squad focuses on evaluating, adapting, and integrating state-of-the-art world generation tools—like World Labs Marble, NVIDIA Cosmos, and text-to-3D platforms—into spatial computing workflows. Emphasis on Fei-Fei Li's vision of generative world models that produce geometrically and physically consistent 3D worlds, making them navigable, editable, and production-ready for immersive applications."
+  },
+  {
+    "id": "symar",
+    "name": "Synthetic Marketing Audiences for Market Research Simulation",
+    "description": "Synthetic audiences in marketing allow brands to accurately simulate consumer segments and test campaigns before real-world launch, ensuring targeted strategies and rapid optimization. This Squad develops AI-powered methodologies for creating realistic customer personas, behavioral models, and market segment simulations that enable comprehensive campaign testing, audience analysis, and personalization strategies without exposing real customer data. Applications include A/B testing acceleration, creative concept validation, and predictive consumer response modeling, providing marketers with privacy-compliant insights and reducing time-to-market for campaign optimization."
+  },
+  {
+    "id": "sysis",
+    "name": "Spatial Simulation for Industrial Scenarios",
+    "description": "Leveraging advanced simulation environments and physics engines to generate realistic training datasets, enabling AI model development without privacy concerns while ensuring data diversity and edge case coverage. This Squad explores photorealistic rendering, procedural content generation, and digital twin technologies to create high-fidelity synthetic datasets for computer vision, robotics, and autonomous systems, addressing data scarcity in specialized domains and enabling robust model training across diverse scenarios and environmental conditions."
+  },
+  {
+    "id": "sytab",
+    "name": "Synthetic Tabular Data Techniques & Benchmarking for Privacy-First ML",
+    "description": "Creating synthetic datasets to scale AI model training while addressing privacy challenges. Benchmarking the value of synthetic data vs real datasets through comprehensive evaluation frameworks that assess statistical fidelity, privacy preservation, and downstream model performance. This Squad develops and validates techniques for tabular data generation, establishing standardized metrics and evaluation protocols to quantify synthetic data quality, utility preservation, and privacy guarantees across diverse domains and use cases."
+  }
+]

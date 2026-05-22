@@ -14,3 +14,7 @@ wheels/
 
 # Local runtime artifacts
 .vanguard/
+
+.langgraph_api/
+
+.DS_Store

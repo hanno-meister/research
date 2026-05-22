@@ -10,8 +10,8 @@ from time import perf_counter
 from fastapi import Body, Depends, FastAPI
 from pydantic import BaseModel, Field
 
-from .graph import builder
-from .langgraph_configuration import LangGraphConfig
+from vanguard.graph import builder
+from vanguard.langgraph_configuration import LangGraphConfig
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")

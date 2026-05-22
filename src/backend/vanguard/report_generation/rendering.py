@@ -9,7 +9,6 @@ from .models import CitedText, ReportDraft, TeamSuggestionDraft
 from .source_policy import final_selected_sources
 
 
-PLACEHOLDER_COMPLETE_TITLE = "Trend Report: World Generation Models for Spatial Computing"
 INTERNAL_SOURCE_ID_RE = re.compile(r"(?:\[S\d+\])+|\bS\d+\b(?!-)" )
 URL_RE = re.compile(r"https?://\S+")
 MAX_URLS_PER_CLAIM = 3
@@ -20,6 +19,15 @@ def title_from_intent(intent: str) -> str:
     if text.lower().startswith("find "):
         text = text[5:].strip()
     return text[:1].upper() + text[1:] if text else "Research"
+
+
+def trend_report_title(state: dict[str, Any]) -> str:
+    lance = state.get("selected_lance") or {}
+    if isinstance(lance, dict):
+        lance_name = str(lance.get("name") or "").strip()
+        if lance_name:
+            return f"Trend Report: {lance_name}"
+    return f"Trend Report: {title_from_intent(str(state.get('research_intent') or 'Research'))}"
 
 
 def dedupe_preserve(items: list[str]) -> list[str]:
@@ -260,7 +268,7 @@ def render_incomplete_report(state, review: dict[str, Any] | None) -> str:
 
 
 def render_complete_report(state, review: dict[str, Any], findings, report_sources, draft: ReportDraft, *, report_status: str = "sufficient") -> str:
-    lines = [f"# {PLACEHOLDER_COMPLETE_TITLE}", "", "## Summary"]
+    lines = [f"# {trend_report_title(state)}", "", "## Summary"]
     if report_status == "partial":
         partial_note = sanitize_report_text(
             str(

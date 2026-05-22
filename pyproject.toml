@@ -12,14 +12,22 @@ dependencies = [
     "langchain-core>=1.3.3",
     "langchain-openai>=1.2.1",
     "langgraph>=1.1.10",
+    "langgraph-cli[inmem]>=0.4.11",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
     "python-dotenv>=1.2.2",
     "tavily-python>=0.7.24",
 ]
 
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src/backend"]
+
 [tool.pytest.ini_options]
-pythonpath = [".", "src"]
+pythonpath = [".", "src/backend"]
 
 [tool.vanguard]
 # TODO: Move to settings
