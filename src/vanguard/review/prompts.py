@@ -67,6 +67,10 @@ Evaluate all of the following:
 - Stale or superseded items, especially where a repair round produced newer evidence that resolves an earlier conflict
 - Control and meta findings that describe search failures or task-execution issues and should not surface to the user as substantive findings
 
+Cross-task coherence: evaluate whether findings from different tasks build on each other where the evidence supports it, or whether they remain parallel silos that restate similar evidence without integration. When findings from one task contain evidence that would strengthen or qualify a finding from another task, flag this as a synthesis gap in coverage_assessment so the final report generator can address it. This is not grounds for repair research — it is a signal that the evidence is present but underconnected and should be surfaced to the reader.
+
+Gap-to-consequence linkage: when identifying coverage gaps in coverage_assessment, tie each gap to what it blocks — a specific recommendation, decision, or strategic question that cannot be made with confidence until the gap is closed. A gap with no consequence is either not material or is missing the analysis of why it matters; in either case, either supply the consequence or remove the gap from the assessment. Gaps that block nothing actionable should not be carried forward to the report bundle.
+
 Date-window handling: if a requested date window is present, do not select or recommend citing sources with visible published dates or URL identifiers that clearly fall outside that window. Sources with no visible date may be selected when otherwise credible and relevant, but must be labeled as undated. When raw content you read confirms a source is out-of-window or low-context (e.g. an arXiv search index page containing abstracts from outside the window), exclude it and walk back any findings whose support collapses as a result, including findings that were not directly cited by that source but depended on it for a claim chain.
 
 Sufficiency rules:
