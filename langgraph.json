@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "agent": "src.vanguard.graph:graph"
+  },
+  "env": ".env"
+}

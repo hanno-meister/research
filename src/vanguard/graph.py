@@ -91,9 +91,10 @@ builder.add_edge("build_report_bundle", "final_report_generation")
 # TODO: The graph is never shown as complete 
 builder.add_edge("final_report_generation", END)
 
+graph = builder.compile()
+
 async def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    graph = builder.compile()
     result = await graph.ainvoke(
         {
             "research_intent": "Research LangGraph for deep research agents",
