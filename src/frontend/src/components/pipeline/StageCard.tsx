@@ -46,8 +46,11 @@ export function StageCard({
         </div>
 
         <span
-          className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium ${STATUS_CLASSES[status]}`}
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${STATUS_CLASSES[status]}`}
         >
+          {status === "running" && (
+            <span className="h-2 w-2 animate-spin rounded-full border border-current border-t-transparent" />
+          )}
           {STATUS_LABELS[status]}
         </span>
       </header>

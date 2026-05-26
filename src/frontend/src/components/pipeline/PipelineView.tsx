@@ -19,11 +19,19 @@ function getStageStatuses(
   values: VanguardStreamValues | undefined,
   isLoading: boolean,
 ): Record<string, StageStatus> {
+  const reviews = Array.isArray(values?.research_reviews) ? values.research_reviews : [];
+  const latestReview = reviews.at(-1);
+  const latestReviewNeedsRepair =
+    latestReview !== undefined &&
+    latestReview.sufficient === false &&
+    Array.isArray(latestReview.follow_up_tasks) &&
+    latestReview.follow_up_tasks.length > 0 &&
+    !values?.final_report;
   const completed = [
     Boolean(values?.research_brief || values?.research_question),
     hasItems(values?.research_tasks),
     hasItems(values?.research_findings) || hasItems(values?.research_sources),
-    hasItems(values?.research_reviews),
+    hasItems(values?.research_reviews) && !latestReviewNeedsRepair,
     Boolean(values?.final_report),
   ];
 

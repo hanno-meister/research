@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, repoRoot, "");
   const smallModel = env.VITE_SMALL_MODEL || env.SMALL_MODEL || "";
   const largeModel = env.VITE_LARGE_MODEL || env.LARGE_MODEL || "";
+  const apiProxyTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8000";
 
   return {
     envDir: repoRoot,
@@ -21,7 +22,7 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       proxy: {
         "/api": {
-          target: "http://localhost:2024",
+          target: apiProxyTarget,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ""),
           ws: true,

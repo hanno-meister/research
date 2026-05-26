@@ -1,0 +1,17 @@
+.git
+.venv
+.env
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+dist
+build
+*.egg-info
+.vanguard
+src/.vanguard
+src/frontend/node_modules
+src/frontend/dist
+src/frontend/.vite
+.DS_Store
