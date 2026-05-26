@@ -1,4 +1,5 @@
 import type { VanguardStreamValues } from "../../../types";
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -8,6 +9,7 @@ interface ReportStageProps {
 }
 
 export function ReportStage({ values }: ReportStageProps) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const report = values?.final_report;
   const reportStatus = typeof values?.report_status === "string" ? values.report_status : null;
 
@@ -21,6 +23,31 @@ export function ReportStage({ values }: ReportStageProps) {
     );
   }
 
+  const reportMarkdown = String(report);
+
+  async function handleCopyMarkdown() {
+    try {
+      await navigator.clipboard.writeText(reportMarkdown);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1500);
+    } catch {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 2000);
+    }
+  }
+
+  function handleDownloadMarkdown() {
+    const blob = new Blob([reportMarkdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = getReportFilename(reportMarkdown);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <article className="rounded-2xl border border-border bg-bg-primary/90 p-5 shadow-sm lg:p-7">
       <div className="mb-5 flex items-start justify-between gap-4 border-b border-border pb-4">
@@ -30,11 +57,27 @@ export function ReportStage({ values }: ReportStageProps) {
             Research synthesis
           </h4>
         </div>
-        {reportStatus && (
-          <span className="rounded-full border border-border bg-bg-secondary px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-text-secondary">
-            {reportStatus}
-          </span>
-        )}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {reportStatus && (
+            <span className="rounded-full border border-border bg-bg-secondary px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-text-secondary">
+              {reportStatus}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={handleCopyMarkdown}
+            className="rounded-full border border-border bg-bg-secondary px-3 py-1 text-[11px] font-medium text-text-secondary transition-colors hover:text-text-primary"
+          >
+            {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy MD"}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadMarkdown}
+            className="rounded-full border border-border bg-bg-secondary px-3 py-1 text-[11px] font-medium text-text-secondary transition-colors hover:text-text-primary"
+          >
+            Download MD
+          </button>
+        </div>
       </div>
 
       <div className="max-w-4xl text-sm leading-7 text-text-primary">
@@ -105,9 +148,18 @@ export function ReportStage({ values }: ReportStageProps) {
             ),
         }}
         >
-          {report}
+          {reportMarkdown}
         </ReactMarkdown>
       </div>
     </article>
   );
+}
+
+function getReportFilename(report: string): string {
+  const title = report.match(/^#\s+(.+)$/m)?.[1] ?? "trend-report";
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  return `${slug || "trend-report"}.md`;
 }

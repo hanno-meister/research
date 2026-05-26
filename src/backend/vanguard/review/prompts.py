@@ -40,8 +40,10 @@ Select sources where reading raw content would change a decision the final revie
 - Sources whose summaries make load-bearing factual or numerical claims that are the primary or only support for required-coverage topics from the research brief
 - Sources flagged with warnings, or whose type suggests low context: search index pages, author pages, feed/index pages, or aggregators
 - Sources with a summary that is too thin, vague, or high-level to verify whether the finding's specific claim is actually present
-- Sources where the published date or URL suggests a possible date-window mismatch with the requested window
+- Sources where the published date or URL suggests a possible date-window mismatch with the requested window. Treat URL identifiers as evidence: arXiv-style identifiers (e.g. 2506.xxxxx) where the numeric prefix indicates a submission month outside the requested window should be flagged regardless of whether the summary contains a visible date
 - Sources that are the sole citation for a finding on a required named target (e.g. a specific product, system, or benchmark named in the brief)
+- In-window comparative overview articles that consolidate a product or system category (e.g. "best X tools", "X landscape", "comparing X vs Y" pieces). These are high-signal because they cross-check individual vendor claims and may surface candidates missed by per-vendor searches
+- Documentation index pages (e.g. llms.txt, table-of-contents pages, top-level docs landing pages). Flag these as entry points requiring follow-up fetching of linked subsection pages, not as terminal sources. The underlying pages frequently contain substantively different information (pricing, export formats, rate limits, architectural details) that the index alone does not expose
 
 Deprioritize sources that are clearly supplementary, redundant with stronger evidence already in the corpus, or whose summary already contains enough detail to evaluate the claim confidently.
 
@@ -66,6 +68,10 @@ Evaluate all of the following:
 - Duplicates and near-duplicates across sources and findings
 - Stale or superseded items, especially where a repair round produced newer evidence that resolves an earlier conflict
 - Control and meta findings that describe search failures or task-execution issues and should not surface to the user as substantive findings
+
+Cross-task coherence and structural split check: scan the retained findings across all tasks for two patterns. First, flag when findings from different tasks remain parallel silos that restate evidence independently rather than building on each other — surface this as a synthesis gap signal to the report generator, not as grounds for repair research. Second, check whether the retained findings naturally split into two or more structurally distinct categories that deserve separate treatment in the final report (e.g. distinct system types, distinct evidence regimes, distinct operational profiles). If a clear split exists, flag it as a structural signal so the report generator treats the categories as separate sections rather than flattening them into a single taxonomy. Neither check is grounds for repair research; both are control signals for the report generator.
+
+Gap-to-consequence linkage: every gap recorded in coverage_assessment must be tied to a specific recommendation or decision that cannot be made with confidence until the gap is closed. Gaps with no stated consequence should be removed or supplied with one. Disclaimer-style gap lists with no downstream impact are a review error.
 
 Date-window handling: if a requested date window is present, do not select or recommend citing sources with visible published dates or URL identifiers that clearly fall outside that window. Sources with no visible date may be selected when otherwise credible and relevant, but must be labeled as undated. When raw content you read confirms a source is out-of-window or low-context (e.g. an arXiv search index page containing abstracts from outside the window), exclude it and walk back any findings whose support collapses as a result, including findings that were not directly cited by that source but depended on it for a claim chain.
 
